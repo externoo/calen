@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl p-10">
+    <h1 class="text-3xl font-bold text-center mb-8">{{ year }}</h1>
+
+    <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+        {% for month in months %}
+        <section class="bg-white rounded-lg p-4 shadow">
+            <h2 class="text-lg font-semibold mb-4 text-center">{{ month.name }}</h2>
+
+            <div class="grid grid-cols-7 text-center text-xs text-slate-500 mb-1">
+                <div>Sun</div>
+                <div>Mon</div>
+                <div>Tue</div>
+                <div>Wed</div>
+                <div>Thu</div>
+                <div>Fri</div>
+                <div>Sat</div>
+            </div>
+
+            {% for week in month.weeks %}
+            <div class="grid grid-cols-7 text-center text-sm">
+                {% for day in week %}
+                    {% if day %}
+                        <a href="{% url 'day' year month.number day %}" class="block py-1 rounded hover:bg-amber-200">{{ day }}</a>
+                    {% else %}
+                    <div class="py-1"></div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </section>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

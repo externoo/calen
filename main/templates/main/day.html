@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}{{ date|date:"j F Y"}}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl p-10">
+    <h1 class="text-3xl font-bold">{{ date|date:"l, j F Y" }}</h1>
+
+    <p class="mt-4 text-slate-600">Commitments for this day will go here.</p>
+
+    <a href="{% url 'home' %}" class="inline-block mt-8 bg-amber-700 hover:bg-fuchsia-700 transition-colors text-white p-2 rounded-sm">Back to {{ date.year}}</a>
+    </div>
+{% endblock %}
