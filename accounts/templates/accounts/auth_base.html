@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-sm bg-white rounded-lg shadow p-8">
+        <h1 class="text-3xl font-bold mb-8 text-center">{% block heading %}Authentication{% endblock %}</h1>
+
+        {% block form %}{% endblock %}
+    </div>
+</div>
+{% endblock %}

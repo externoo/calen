@@ -2,3 +2,29 @@
 
 @source "../../templates";
 @source "../../main/templates";
+@source "../../accounts/templates";
+
+@layer components {
+    input[type="text"],
+    input[type="email"],
+    input[type="password"] {
+      @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 focus:border-amber-700 focus:outline-none;
+}
+
+form p {
+    @apply mb-4;
+}
+
+form label {
+    @apply block mb-1 text-sm font-medium text-slate-700;
+}
+
+.helptext,
+    form ul {
+    @apply text-xs text-slate-500 mt-1 list-disc list-inside;
+}
+
+.errorlist {
+    @apply text-sm text-red-700 list-none mb-2;
+}
+}

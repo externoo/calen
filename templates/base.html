@@ -10,11 +10,23 @@
 </head>
 <body class="bg-slate-200 text-slate-900">
     <nav>
-        <ul class="uppercase tracking-wider flex gap-x-4 gap-y-1 text-lg justify-center sm:justify-between flex-wrap">
-          <li><a href="" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">Home</a></li>
-          <li><a href="" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">set date</a></li>
-        </ul>
-      </nav>
+      <ul class="uppercase tracking-wider flex gap-x-4 gap-y-1 text-lg justify-center sm:justify-between flex-wrap">
+        <li><a href="{% url 'home' %}" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">Home</a></li>
+
+        {% if user.is_authenticated %}
+        <li class="p-2">{{ user.username }}</li>
+        <li>
+        <form method="post" action="{% url 'accounts:logout' %}">
+          {% csrf_token %}
+          <button type="submit" class="uppercase tracking-wider bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm cursor-pointer">Logout</button>
+        </form>
+        </li>
+        {% else %}
+            <li><a href="{% url 'accounts:login' %}" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">Login</a></li>
+            <li><a href="{% url 'accounts:register' %}" class="bg-purple-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">Register</a></li>
+        {% endif %}
+      </ul>
+    </nav>
     {% block content %}{% endblock %}
 </body>
 </html>
