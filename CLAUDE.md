@@ -94,13 +94,30 @@ Django renders form widgets, so Tailwind classes can't be added in the template.
 
 **Failure mode worth knowing:** when the Tailwind CLI hits an error it aborts the build and leaves the previous `output.css` in place. The site then looks completely normal, just unchanged — nothing in the browser tells you the build died. If a style edit seems to do nothing, read the watcher terminal.
 
+## Admin
+
+Both models are registered, in the two different spellings — deliberately, since each is the right one for its case.
+
+**`CustomUser` uses the stock `UserAdmin`** (`admin.site.register(CustomUser, UserAdmin)`), with nothing subclassed. This is not optional politeness: `password` is an ordinary `CharField` as far as introspection can see, so a plain `ModelAdmin` renders it as an editable text box and saves whatever you type as the "hash" — permanently locking that account out. `UserAdmin` swaps in `UserChangeForm`, whose `ReadOnlyPasswordHashField` is `disabled=True` (so a POST to it is ignored, not merely greyed out) and renders a truncated `safe_summary()` of the hash plus a link to `../password/`. It also brings `add_fieldsets`, so the *Add user* screen asks only for username + two password boxes.
+
+`UserAdmin` was written against `auth.User`, but `ModelAdmin.get_form()` rebuilds the form against `self.model`, and `CustomUser` only *adds* an `id` field — so every field its `fieldsets` names still exists.
+
+**`Commitment` uses `@admin.register(Commitment)` on a `ModelAdmin` subclass**, because it needs configuration: `list_display`, `list_filter`, `search_fields`, `date_hierarchy = "date"` (the year→month→day drill-down; the thing that makes a calendar app's admin usable), `autocomplete_fields = ("user",)` and `readonly_fields = ("created_at",)`.
+
+Worth knowing:
+
+- The decorator is **side-effect-only** — it calls `admin_site.register(...)` and returns the class untouched, so it is exactly equivalent to a bottom-of-file `admin.site.register(Commitment, CommitmentAdmin)`. Contrast `@method_decorator(...)` on `RegisterView`, which *replaces* the class.
+- Registration happens **at import time**: `django.contrib.admin`'s app config auto-imports each app's `admin` module at startup. That is why the code must live in `admin.py`, and why a syntax error there takes down the whole admin.
+- **`autocomplete_fields` couples the two admin classes.** It works only because the *referenced* admin defines `search_fields`, which `UserAdmin` does. Registering `CustomUser` without one raises `admin.E040`.
+- **`python manage.py check` runs the admin checks** without a browser or server, and returns a stable `admin.Exxx` code that is searchable in the docs. Reach for it first when the admin misbehaves. (`runserver` runs the same checks, so a bad admin config stops the server outright rather than failing per-request.)
+- Tuple gotcha, hit once already: `("text",)` is a one-tuple; `("text,")` is a string and yields `admin.E126`. Parentheses don't make a tuple — the comma does.
+
 ## Current state
 
-Working: the 2026 calendar grid (`home`), a bare day page (`day`), and the full auth flow. `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
+Working: the 2026 calendar grid (`home`), a bare day page (`day`), the full auth flow, and the admin for both models. `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
 
 Not done yet:
 
-- **Admin registration** — `accounts\admin.py` and `main\admin.py` are both still empty. `CustomUser` must be registered with `UserAdmin`, *not* a plain `ModelAdmin`: the generic one renders the password as an editable text box and saves whatever you type as plaintext, permanently locking that account out.
 - **`Commitment` is unused by any view.** `day.html` shows only a date; nothing reads or writes commitments yet.
 - **i18n / l10n** — `USE_I18N` is on and the models already use `gettext_lazy`, but there is no `LocaleMiddleware`, no `LOCALE_PATHS`, no translated templates, and no `.po` files.
 - **CI/CD** — nothing yet.
@@ -114,7 +131,9 @@ Built the entire auth flow, one step at a time: added `accounts/templates` to `i
 
 Explained along the way: why an element cannot center itself with its own flex properties (so the auth card needs an outer positioning div and an inner decorating div); `reverse` vs `reverse_lazy`, and import-time vs request-time evaluation; why `UserCreationForm` must be subclassed for a custom user model; why logout became POST-only; and reading dotted settings paths as real folders to spot typos (a `django.contrib.messages.auth.middleware...` typo cost a debugging round).
 
-Left at: step 8, admin registration, not yet implemented.
+Then did step 8, admin registration, in two halves: `CustomUser` with the stock `UserAdmin`, then `CommitmentAdmin` via `@admin.register`. Verified in the browser that the password renders as a read-only hash summary, that *User* is an autocomplete search box, and that *Created at* is absent from the add form. Explained what a decorator actually desugars to, and the difference between one that observes its target (`@admin.register`) and one that replaces it (`@method_decorator`). See the **Admin** section above for the details worth keeping.
+
+Left at: step 8 complete. Next up is wiring `Commitment` into the `day` view — nothing user-facing reads or writes it yet.
 
 ## Session history (2026-08-21)
 

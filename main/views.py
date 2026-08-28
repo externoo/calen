@@ -1,4 +1,5 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from .forms import CommitmentForm
 import calendar
 import datetime
 
@@ -18,4 +19,21 @@ def home(request):
 
 def day(request, year, month, day):
     date = datetime.date(year, month, day)
-    return render(request, 'main/day.html', {"date": date})
+
+    if request.method == "POST":
+        form = CommitmentForm(request.POST)
+        if form.is_valid():
+            commitment = form.save(commit=False)
+            commitment.user = request.user
+            commitment.date = date
+            commitment.save()
+            return redirect("day", year=year, month=month, day=day)
+    else:
+        form = CommitmentForm()
+
+    commitments = request.user.commitments.filter(date=date)
+    return render(request, "main/day.html",{
+        "date": date, 
+        "commitments": commitments,
+        "form": form,
+    })
