@@ -12,9 +12,9 @@ jobs:
         DJANGO_SECRET_KEY: not-a-real-key-only-for-ci
 
       steps:
-        - uses: actions/checkout@v4
+        - uses: actions/checkout@v5
 
-        - uses: actions/setup-python@v5
+        - uses: actions/setup-python@v6
           with:
             python-version: "3.13"
 
