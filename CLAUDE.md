@@ -214,8 +214,7 @@ The POST test's `user` and `date` assertions are the ones that earn their keep �
 
 Not done yet:
 
-- **`feature/ci` is not merged.** Its three commits (tests, workflow, action bump) sit ahead of `develop`, which is still at `8b34c4b`. The plan is two PRs: `feature/ci` → `develop` (ungated), then `develop` → `main` through the `test` gate.
-- **`main` is behind `develop`** by the day-commitments work, deliberately — that merge is the one the gate exists for.
+- **Tests cover the `day` view only.** `home` is untested, and so is the whole of `accounts` — `accounts\tests.py` is still the empty stub. Registration is the interesting target there: it is the one view carrying `@login_not_required`, so a regression would lock every new user out silently.
 - **No `.gitattributes`.** CI is Linux and the repo is full of CRLF; needed before any check that diffs a generated file.
 - **i18n / l10n** — `USE_I18N` is on and the models already use `gettext_lazy`, but there is no `LocaleMiddleware`, no `LOCALE_PATHS`, no translated templates, and no `.po` files.
 - `main` still has no `urls.py`; its two routes are wired directly in `calen\urls.py`.
@@ -237,7 +236,13 @@ Explained along the way: why a system package manager ignores the current direct
 
 Three recurring snags, all environmental: pasted commands wrapping onto a second line, so bash ran the trailing flag as its own command (twice — `--accept-visibility-change-consequences` and the `!` prefix needing to be the very first character); and `gh` not being on `PATH` in already-running shells after install, since winget's `PATH` edit can't reach backwards into them.
 
-Left at: steps 1–3 done and verified. `feature/ci` is at `1db3ace` and pushed, `develop` at `8b34c4b`, `main` at `fb13b59`. Next: PR `feature/ci` → `develop`, then PR `develop` → `main`, watching `test` gate that second merge — the whole point of the exercise.
+Left at: **all four steps done.** PR #2 merged `feature/ci` into `develop` (`44a32a9`) and PR #3 merged `develop` into `main` (`f8081ed`) — `main`, `develop` and local `main` are all in sync for the first time since August, and `feature/ci` is deleted locally and on `origin`.
+
+PR #3 is the one worth remembering: `gh pr view 3` reported `mergeStateStatus: BLOCKED` while the check ran and `CLEAN` once it passed. Nothing was done to unblock it — the passing check flipped it. That is steps 1–3 working, observed rather than assumed. PR #2, targeting the ungated `develop`, was mergeable from the moment it opened.
+
+Also worth noting: the final `git pull` on `main` was a **fast-forward**, because local `main` had no commits of its own. That is the "nothing is committed to `main` directly" rule showing up as an observable property — if it ever stops fast-forwarding, something was committed there that shouldn't have been.
+
+Next: nothing is half-finished. Open items are the ones listed under **Current state** — `.gitattributes` first, since CI is Linux now, then tests for `accounts`.
 
 ## Session history (2026-08-28)
 
