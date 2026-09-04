@@ -144,10 +144,19 @@ git switch -c feature/x
 git add <files>                          # stage one coherent change at a time
 git commit -m "subject" -m "body"        # imperative subject; body says *why*
 git push -u origin feature/x             # -u only the first time
-# open the PR on GitHub — base must be develop, NOT main (GitHub defaults to main)
-git switch develop && git pull
-git branch -d feature/x && git fetch --prune
+gh pr create --base develop --fill       # base must be develop; gh defaults to main
+gh pr merge <n> --merge --delete-branch  # switches, pulls and deletes both copies
 ```
+
+Releasing to `main` is a second PR, and it has a tail:
+
+```bash
+gh pr create -B main -t "..." -b "..."   # --fill titles it "develop" on multi-commit PRs
+gh pr merge <n> --merge                  # NO --delete-branch — develop is long-lived
+git merge origin/main && git push        # back-merge, from develop
+```
+
+**The back-merge is not optional.** Merging `develop` into `main` creates a merge commit that exists on `main` only, so `develop` is immediately one commit behind. Combined with "require branches to be up to date", the *next* release PR then opens as `BEHIND` and refuses to merge. Doing it right after each release keeps the branches level and the next PR `CLEAN`; skip it and use GitHub's **Update branch** button instead. Both times it has been a fast-forward, since `develop` had nothing `main` lacked.
 
 Things worth remembering:
 
@@ -161,7 +170,15 @@ Things worth remembering:
 
 `output.css` is committed but regenerated constantly, so the watcher leaves it dirty. A pull that touches it aborts with *"Your local changes would be overwritten by merge."* Stop the watcher (Ctrl-C) before pulling or switching branches. If it already happened, `git restore static/css/output.css` throws the local copy away — safe *only* because that file is a build artifact.
 
-Also expect `warning: LF will be replaced by CRLF` on every `output.css` operation. `core.autocrlf=true` (Git for Windows' default) stores LF in history and hands back CRLF on checkout; the Node-based Tailwind CLI writes LF. Harmless. A `.gitattributes` would pin this per file type instead of per developer — worth adding when CI (Linux) enters the picture.
+### Line endings
+
+`.gitattributes` pins the policy **per repository** instead of per developer. `core.autocrlf=true` (Git for Windows' default) happens to do the right thing on this machine, but nothing in the project required it — a clone where it is off would start committing CRLF into history. The committed file removes that dependency.
+
+`* text=auto` is the engine: LF in the repository, native endings in the working tree. On top of it, `*.sh eol=lf` (a CRLF shell script fails on Linux with `bad interpreter: /bin/bash^M`, and CI is Linux), `*.bat`/`*.cmd eol=crlf`, a `binary` block for image/font/sqlite extensions, and `static/css/output.css linguist-generated=true` — which collapses that file in GitHub PR diffs and drops it from the repo's language stats, so the noisiest file in the tree stops dominating both.
+
+Adding this was safe **because the index was already all-LF** (`git ls-files --eol` showed no `i/crlf`). Had it not been, the change would have started with `git add --renormalize .` and a diff touching every line of every file. Check first; `git add --renormalize .` staging nothing is the proof there is no churn. `git check-attr text eol linguist-generated -- <path>` shows what the rules actually resolve to for a given file, which is the verification step worth not skipping.
+
+**`warning: LF will be replaced by CRLF` still appears, and that is correct** — it is the checkout conversion doing its job. Silencing it would mean `* text=auto eol=lf`, which is a bad trade here: the editor on Windows saves CRLF by default, so files would show as modified on every save.
 
 ## CI
 
@@ -200,6 +217,23 @@ Every one of these fails **silently** if wrong, which is why they're worth listi
 
 The ruleset targets `~DEFAULT_BRANCH` only, so **`develop` is deliberately ungated** — CI reports there but cannot block. That is the point of the branch: breakage is allowed to surface somewhere before `main`.
 
+### Reading a PR's state
+
+Two separate fields, answering two different questions. `mergeable` (`MERGEABLE` / `CONFLICTING` / `UNKNOWN`) is mechanical — can git do the merge at all. `mergeStateStatus` is policy — will GitHub permit it. A PR is routinely `MERGEABLE` and `BLOCKED` at the same time.
+
+| `mergeStateStatus` | Meaning | Merge button |
+|---|---|---|
+| `CLEAN` | Everything required has passed | live |
+| `UNSTABLE` | Checks pending or failing, but **none are required** | live |
+| `BLOCKED` | A required rule is unsatisfied | dead |
+| `BEHIND` | Head lacks the base's latest commits, with the strict policy on | dead |
+| `DIRTY` | Real merge conflict | dead |
+| `UNKNOWN` | Not computed yet | — |
+
+`UNSTABLE` vs `BLOCKED` on *identical* pending checks is precisely the ungated/gated difference between `develop` and `main` — the clearest way to see the ruleset working. Watch it with `gh pr checks <n> --watch` and `gh pr view <n> --json mergeStateStatus`.
+
+Caveat: PR #5 reported `BEHIND` and then went `CLEAN` with no branch update, which is not fully explained — `UNKNOWN` being served as a stale value while GitHub computed mergeability is the likely culprit, not a verified one.
+
 ## Current state
 
 Working: the 2026 calendar grid (`home`), the `day` page with commitment create + list, the full auth flow, and the admin for both models. `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
@@ -215,10 +249,14 @@ The POST test's `user` and `date` assertions are the ones that earn their keep �
 Not done yet:
 
 - **Tests cover the `day` view only.** `home` is untested, and so is the whole of `accounts` — `accounts\tests.py` is still the empty stub. Registration is the interesting target there: it is the one view carrying `@login_not_required`, so a regression would lock every new user out silently.
-- **No `.gitattributes`.** CI is Linux and the repo is full of CRLF; needed before any check that diffs a generated file.
+- **No CD.** There is CI but nothing deploys anywhere, and no host has been chosen.
+- **CI never checks that `output.css` is fresh.** Edit a template with the watcher off and a stale stylesheet merges silently. The check would be building it and `git diff --exit-code static/css/output.css`; `.gitattributes` now exists, so that is unblocked.
 - **i18n / l10n** — `USE_I18N` is on and the models already use `gettext_lazy`, but there is no `LocaleMiddleware`, no `LOCALE_PATHS`, no translated templates, and no `.po` files.
 - `main` still has no `urls.py`; its two routes are wired directly in `calen\urls.py`.
 - Missing trailing newlines in `main\views.py`, `main\forms.py`, `main\admin.py`, `accounts\admin.py` (`\ No newline at end of file` in diffs). Cosmetic, but it makes future diffs noisier.
+- **Telegram notifications (wanted).** Link a Telegram bot to the site and message a user when a commitment is coming up. Rough shape: a bot token from `@BotFather` kept in `.env` alongside `DJANGO_SECRET_KEY` (never committed — see **Environment variables**), a `telegram_chat_id` field on `CustomUser` plus some way for a user to link their account (the usual trick is the site showing a one-time code the user sends to the bot, since Telegram will not reveal a chat id otherwise), and a management command that queries commitments due in a window and posts to the Bot API.
+
+  **The real blocker is not the bot, it is that nothing runs on a schedule.** Everything here is request-driven; there is no host, no worker, no cron — so "when an event comes up" has nothing to fire it. A management command plus the host's scheduler is the simplest answer once there *is* a host, which makes this depend on **CD**. A scheduled GitHub Actions workflow could stand in for a cron, but it would need network access to a deployed database, so it does not dodge the dependency. Sending is the easy half: one HTTPS POST to `api.telegram.org`, no library required.
 
 `static/css/output.css` is **committed on purpose** — `collectstatic` copies that file, it does not generate it. Regenerating it makes it show up in `git status` constantly; that is expected, not a problem.
 
@@ -242,7 +280,15 @@ PR #3 is the one worth remembering: `gh pr view 3` reported `mergeStateStatus: B
 
 Also worth noting: the final `git pull` on `main` was a **fast-forward**, because local `main` had no commits of its own. That is the "nothing is committed to `main` directly" rule showing up as an observable property — if it ever stops fast-forwarding, something was committed there that shouldn't have been.
 
-Next: nothing is half-finished. Open items are the ones listed under **Current state** — `.gitattributes` first, since CI is Linux now, then tests for `accounts`.
+After that, two more trips through the same loop, both deliberately small so the workflow itself was the exercise: PR #4/#5 synced the docs, and PR #6/#7 added `.gitattributes` (see **Line endings** above). Seven PRs total.
+
+The workflow lessons those produced are all folded into **Git workflow** and **Branch protection on `main`** above: the back-merge that every release needs, the `CLEAN`/`UNSTABLE`/`BLOCKED`/`BEHIND` vocabulary, `--delete-branch` being right for feature branches and wrong for `develop`, and `--force-with-lease` over `--force` when amending an already-pushed commit.
+
+One prediction confirmed: PR #7 opened `BLOCKED` but **not** `BEHIND`, because the back-merge after PR #5 had already levelled the branches. The mechanism behaves as described.
+
+Left at: `main` and `develop` both at `e317877`, working tree clean, everything pushed. Nothing half-finished.
+
+Next: the small ones first — trailing newlines, then `main\urls.py`, then tests for `accounts` (registration especially: `@login_not_required` failing there locks out every new user with no error anywhere). Features are the real gap — `Commitment` still cannot be edited or deleted, and `home` does not show which days have any. Telegram notifications are wanted (see **Current state**), but they are gated on there being a deployment with a scheduler.
 
 ## Session history (2026-08-28)
 
