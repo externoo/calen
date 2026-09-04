@@ -1,0 +1,24 @@
+# Normalize all text files to LF in the repository. Working-tree endings
+# stay native, so Windows checkouts are still CRLF.
+* text=auto
+
+# Must stay LF regardless of platform — CI runs these on Linux.
+*.sh text eol=lf
+
+# Must stay CRLF — Windows refuses to parse LF batch files reliably.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Generated, not authored: collapse in GitHub diffs, exclude from language stats.
+static/css/output.css linguist-generated=true
+
+# Never convert, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.sqlite3 binary
