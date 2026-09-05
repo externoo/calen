@@ -2,12 +2,11 @@
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the PACKAGE package.
 # FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
-
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-05 16:11+0300\n"
+"POT-Creation-Date: 2026-09-05 17:11+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,6 +16,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=6; plural=n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 "
 "&& n%100<=10 ? 3 : n%100>=11 && n%100<=99 ? 4 : 5;\n"
+
 #: .\accounts\models.py:12 .\main\models.py:15
 msgid "user"
 msgstr "مستخدم"
@@ -30,12 +30,12 @@ msgid "Authentication"
 msgstr "المصادقة"
 
 #: .\accounts\templates\accounts\login.html:3
-#: .\accounts\templates\accounts\login.html:9 .\templates\base.html:26
+#: .\accounts\templates\accounts\login.html:9 .\templates\base.html:45
 msgid "Login"
 msgstr "تسجيل الدخول"
 
 #: .\accounts\templates\accounts\register.html:3
-#: .\accounts\templates\accounts\register.html:9 .\templates\base.html:27
+#: .\accounts\templates\accounts\register.html:9 .\templates\base.html:46
 msgid "Register"
 msgstr "إنشاء حساب"
 
@@ -46,6 +46,54 @@ msgstr "الإنجليزية"
 #: .\calen\settings.py:136
 msgid "Arabic"
 msgstr "العربية"
+
+#: .\main\dates.py:21
+msgid "January"
+msgstr "كانون الثاني"
+
+#: .\main\dates.py:22
+msgid "February"
+msgstr "شباط"
+
+#: .\main\dates.py:23
+msgid "March"
+msgstr "آذار"
+
+#: .\main\dates.py:24
+msgid "April"
+msgstr "نيسان"
+
+#: .\main\dates.py:25
+msgid "May"
+msgstr "أيار"
+
+#: .\main\dates.py:26
+msgid "June"
+msgstr "حزيران"
+
+#: .\main\dates.py:27
+msgid "July"
+msgstr "تموز"
+
+#: .\main\dates.py:28
+msgid "August"
+msgstr "آب"
+
+#: .\main\dates.py:29
+msgid "September"
+msgstr "أيلول"
+
+#: .\main\dates.py:30
+msgid "October"
+msgstr "تشرين الأول"
+
+#: .\main\dates.py:31
+msgid "November"
+msgstr "تشرين الثاني"
+
+#: .\main\dates.py:32
+msgid "December"
+msgstr "كانون الأول"
 
 #: .\main\models.py:17
 msgid "date"
@@ -76,10 +124,10 @@ msgstr "لا توجد التزامات لهذا اليوم بعد."
 msgid "Back to %(year)s"
 msgstr "العودة إلى %(year)s"
 
-#: .\templates\base.html:15
+#: .\templates\base.html:21
 msgid "Home"
 msgstr "الرئيسية"
 
-#: .\templates\base.html:22
+#: .\templates\base.html:42
 msgid "Logout"
 msgstr "تسجيل الخروج"

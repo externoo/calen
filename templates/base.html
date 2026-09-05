@@ -13,26 +13,13 @@
     <link rel="stylesheet" href="{% static 'css/output.css' %}">
 </head>
 <body class="bg-slate-200 text-slate-900">
-    <nav>
+    <nav class="p-4">
+      <ul class="uppercase tracking-wider flex items-start justify-between gap-4 text-lg">
 
-      <ul class="uppercase tracking-wider flex gap-x-4 gap-y-1 text-lg justify-center sm:justify-between flex-wrap">
+        {# start: home, with the language switcher stacked underneath #}
+        <li class="flex flex-col items-start gap-1">
+          <a href="{% url 'home' %}" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">{% translate "Home" %}</a>
 
-        <li><a href="{% url 'home' %}" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">{% translate "Home" %}</a></li>
-
-        {% if user.is_authenticated %}
-          <li class="p-2">{{ user.username }}</li>
-          <li>
-            <form method="post" action="{% url 'accounts:logout' %}">
-              {% csrf_token %}
-              <button type="submit" class="uppercase tracking-wider bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm cursor-pointer">{% translate "Logout" %}</button>
-            </form>
-          </li>
-        {% else %}
-          <li><a href="{% url 'accounts:login' %}" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">{% translate "Login" %}</a></li>
-          <li><a href="{% url 'accounts:register' %}" class="bg-purple-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">{% translate "Register" %}</a></li>
-        {% endif %}
-
-        <li>
           <form method="post" action="{% url 'set_language' %}">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ request.get_full_path }}">
@@ -42,6 +29,22 @@
               {% endfor %}
             </select>
           </form>
+        </li>
+
+        {# middle: who is signed in #}
+        <li class="p-2">{% if user.is_authenticated %}{{ user.username }}{% endif %}</li>
+
+        {# end: the account action #}
+        <li class="flex gap-x-4">
+          {% if user.is_authenticated %}
+            <form method="post" action="{% url 'accounts:logout' %}">
+              {% csrf_token %}
+              <button type="submit" class="uppercase tracking-wider bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm cursor-pointer">{% translate "Logout" %}</button>
+            </form>
+          {% else %}
+            <a href="{% url 'accounts:login' %}" class="bg-amber-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">{% translate "Login" %}</a>
+            <a href="{% url 'accounts:register' %}" class="bg-purple-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">{% translate "Register" %}</a>
+          {% endif %}
         </li>
 
       </ul>

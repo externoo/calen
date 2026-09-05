@@ -164,6 +164,17 @@ The fix is to route through Django's own catalogue, which already contains all n
 
 `WEEKDAYS_ABBR` is rotated by `(firstweekday + offset) % 7` rather than hardcoded, so the header row cannot drift out of step with `Calendar(firstweekday=...)`.
 
+### Overriding Django's own translations
+
+Django's Arabic catalogue *transliterates* the Latin month names (`يناير`, `فبراير`) — the spellings used in Egypt and the Gulf, but not Arabic words. `main\dates.py` overrides all twelve with the Syriac-origin Levantine names (`كانون الثاني`, `شباط`, `آذار`…).
+
+The mechanism is catalogue precedence: **`LOCALE_PATHS` is searched before an app's `locale\` and before Django's own**, so an entry with the same `msgid` wins. Two consequences worth holding on to:
+
+- **It is project-wide, not local to the calendar grid.** The `date` filter's `F`, the admin's `date_hierarchy`, anything that renders a month name — all pick it up. `day.html`'s `{{ date|date:"l, j F Y" }}` was never touched and shows `آذار` too.
+- **The `msgid`s must be referenced from real source** or `makemessages` marks them obsolete (`#~`) on the next rescan and the override silently evaporates. That is the whole reason `main\dates.py` exists as a module with twelve `gettext_lazy` calls rather than entries typed straight into the `.po`.
+
+This is the general escape hatch for *any* Django string whose stock translation is wrong: mark the same `msgid` in our own source and translate it.
+
 ### The switcher
 
 `set_language` is mounted at `i18n/setlang/` and wrapped: **`login_not_required(set_language)`**. Django exempts its own auth views and the admin login from `LoginRequiredMiddleware` but *not* this one, so the documented `include('django.conf.urls.i18n')` wiring produces a switcher that redirects anonymous visitors to the login page — exactly where a non-English speaker first needs it. Applying the decorator by call rather than by `@` is the only option for a view we don't own.
