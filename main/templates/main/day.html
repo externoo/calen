@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load i18n %}
 
 {% block title %}{{ date|date:"j F Y"}}{% endblock %}
 
@@ -10,16 +11,16 @@
         {% csrf_token %}
         {{ form.as_p }}
         <button type="submit" class="bg-amber-700 hover:bg-fuchsia-700
-        transition-colors text-white p-2 rounded-sm">Add</button>
+        transition-colors text-white p-2 rounded-sm">{% translate "Add" %}</button>
     </form>
 
     <ul class="mt-6 space-y-2">
       {% for commitment in commitments %}
           <li class="rounded-sm border border-slate-200 p-3">{{ commitment.text }}</li>
       {% empty %}
-          <li class="text-slate-600">Nothing committed for this day yet.</li>
+          <li class="text-slate-600">{% translate "Nothing committed for this day yet." %}</li>
       {% endfor %}
     </ul>
-    <a href="{% url 'home' %}" class="inline-block mt-8 bg-amber-700 hover:bg-fuchsia-700 transition-colors text-white p-2 rounded-sm">Back to {{ date.year}}</a>
+    <a href="{% url 'home' %}" class="inline-block mt-8 bg-amber-700 hover:bg-fuchsia-700 transition-colors text-white p-2 rounded-sm">{% blocktranslate with year=date.year %}Back to {{ year }}{% endblocktranslate %}</a>
     </div>
 {% endblock %}

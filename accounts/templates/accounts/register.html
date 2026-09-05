@@ -1,11 +1,11 @@
 {% extends "accounts/auth_base.html" %}
-
-{% block heading %}Register{% endblock %}
+{% load i18n %}
+{% block heading %}{% translate "Register" %}{% endblock %}
 
 {% block form %}
     <form method="post">
         {% csrf_token %}
         {{ form.as_p }}
-        <button type="submit" class="bg-purple-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">Register</button>
+        <button type="submit" class="bg-purple-700 hover:bg-fuchsia-700 transition-colors p-2 rounded-sm">{% translate "Register" %}</button>
     </form>
 {% endblock %}

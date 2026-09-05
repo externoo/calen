@@ -37,6 +37,13 @@ python manage.py makemigrations && python manage.py migrate
 python manage.py createsuperuser
 ```
 
+Translations (see **Internationalization** below):
+
+```bash
+python manage.py makemessages -l ar --ignore=node_modules   # rescan sources -> .po
+python manage.py compilemessages                            # .po -> .mo, what Django loads
+```
+
 Environment: Django 6.0.6 on Python 3.13, SQLite (`db.sqlite3`), Tailwind v4.3.3 via npm. `requirements.txt` exists (Django alone) and there is no virtualenv. Git repo with remote `origin` → https://github.com/externoo/calen.git, **public** since 2026-09-04. The GitHub CLI (`gh`) is installed machine-wide via winget and authenticated as `externoo`.
 
 ## Environment variables
@@ -120,6 +127,62 @@ Django renders form widgets, so Tailwind classes can't be added in the template.
 `components` loses to `utilities` in Tailwind's cascade, so a utility class in the markup still overrides these defaults.
 
 **Failure mode worth knowing:** when the Tailwind CLI hits an error it aborts the build and leaves the previous `output.css` in place. The site then looks completely normal, just unchanged — nothing in the browser tells you the build died. If a style edit seems to do nothing, read the watcher terminal.
+
+## Internationalization (i18n / l10n)
+
+English and Arabic, chosen per request by `LocaleMiddleware` and remembered in a cookie. `LANGUAGES` is a deliberate two-entry allowlist — Django's default is every language it ships, so a browser advertising `de` would otherwise get a half-German admin.
+
+Requires **GNU gettext** (`xgettext`, `msgfmt`) on `PATH`; `makemessages` and `compilemessages` are thin wrappers around those binaries and Windows ships neither. Installed here at `AppData\Local\Programs\gettext-iconv\bin`.
+
+There is **no `USE_L10N`** — removed in Django 5.0. Locale-aware date and number formatting is always on and cannot be switched off.
+
+### The pipeline, and where it breaks
+
+`.po` (hand-edited, committed) → `compilemessages` → `.mo` (binary, **also committed**) → loaded at runtime. **Django never reads the `.po`.** Editing translations without recompiling is the single most common "my translations don't work" cause, and it fails silently — old `.mo`, or none, and the site serves English.
+
+`django.mo` is committed for the same reason as `output.css`: nothing generates it at deploy time. Same drawback too — it can go stale silently, and CI checks neither. `*.mo binary` in `.gitattributes` stops `* text=auto` guessing and corrupting it with an eol conversion.
+
+`makemessages` **must** be run with `--ignore=node_modules`. Its default ignore list is only `CVS`, `.*`, `*~`, `*.pyc`, so without the flag it walks every Tailwind dependency and can scrape third-party strings into our catalogue with source references pointing into `node_modules`.
+
+### Marking strings
+
+`{% translate "..." %}` for literals, `{% blocktranslate %}` for anything containing a variable — the latter hands the translator a whole sentence with a named slot instead of a fragment that hardcodes English word order.
+
+- **`{% load i18n %}` is required in every template that uses the tags**, including ones that `{% extends %}` a template which already loads it. `{% load %}` is not inherited. Symptom: `Invalid block tag 'translate'`.
+- `blocktranslate` accepts only bare variable names inside the block — no attribute lookups, filters or tags. Bind first: `{% blocktranslate with year=date.year %}`.
+- A placeholder (`%(year)s`) must survive verbatim into the translation. `#, python-format` makes `msgfmt` enforce it, so a mangled one fails at compile rather than as a runtime `KeyError`.
+- **A missed marking never fails.** It renders as English forever, with nothing anywhere reporting it. The `.po` file is the audit: every `#:` line is a marked string, so what's absent is what you forgot.
+- Marking is **static** — `xgettext` reads source text. `{% translate some.variable %}` is valid syntax that puts no `msgid` in the catalogue and so never translates.
+- Identical strings collapse into one `msgid` with several `#:` references. When the same English word needs different translations by context, the tool is `pgettext("context", "text")`.
+- Model `verbose_name`s already use `gettext_lazy`, so they are collected automatically — as are the `LANGUAGES` names in `settings.py`. Form labels from Django's own `AuthenticationForm`/`UserCreationForm` are translated upstream and need nothing.
+
+### `calendar.month_name` is a trap
+
+Python's stdlib `calendar` reads the **C locale**, which Django never sets. `month_name[1]` is `"January"` in every language, silently. Same for `day_abbr`.
+
+The fix is to route through Django's own catalogue, which already contains all nineteen names in Arabic: the view passes a `date` object per month and the template formats it with `{{ month.date|date:"F" }}`, and weekday headers come from `django.utils.dates.WEEKDAYS_ABBR` (a dict keyed `0`=Monday, values `gettext_lazy`). **Nineteen translations for free, and none of them in our `.po`.**
+
+`WEEKDAYS_ABBR` is rotated by `(firstweekday + offset) % 7` rather than hardcoded, so the header row cannot drift out of step with `Calendar(firstweekday=...)`.
+
+### The switcher
+
+`set_language` is mounted at `i18n/setlang/` and wrapped: **`login_not_required(set_language)`**. Django exempts its own auth views and the admin login from `LoginRequiredMiddleware` but *not* this one, so the documented `include('django.conf.urls.i18n')` wiring produces a switcher that redirects anonymous visitors to the login page — exactly where a non-English speaker first needs it. Applying the decorator by call rather than by `@` is the only option for a view we don't own.
+
+It is a POST form with `{% csrf_token %}`. `set_language` ignores GET by design (it changes how the whole site renders, so a link prefetch must not trigger it) — same reasoning as POST-only logout.
+
+`LANGUAGE_CODE` is `'en'`, not `'en-us'`, so it matches the `LANGUAGES` key. Both work at runtime via Django's regional fallback, but the switcher compares the active code against those keys, and `'en' != 'en-us'` would leave the dropdown never marking the current language `selected` — with no error.
+
+### RTL
+
+`<html>` carries `lang` and `dir` driven by `{% get_current_language_bidi %}`, which reads `settings.LANGUAGES_BIDI` (ships with `ar`, `he`, `fa`, `ur`) rather than guessing from the code — so a future RTL language needs no further edit. `lang` matters independently of `dir`: screen-reader voice, hyphenation, font fallback.
+
+Nothing else needed changing, because the project uses **no physical-direction utilities**. `flex`, `grid`, `justify-between`, `text-center` and `mx-auto` all follow `direction` on their own; only physical properties like `margin-left` don't.
+
+**Keep it that way.** Prefer the logical utilities — `ms-`/`me-` over `ml-`/`mr-`, `ps-`/`pe-` over `pl-`/`pr-`, `text-start`/`text-end`, `border-s`/`border-e`, `start-`/`end-`, and `gap-x-` over `space-x-` (which uses physical margins). They compile to CSS logical properties and flip themselves. For the rare thing that must *not* flip, Tailwind has `rtl:` and `ltr:` variants.
+
+Arabic has **six plural forms**; Django already wrote the correct `Plural-Forms` header into the `.po`. The first `{% blocktranslate count %}` will therefore have `msgstr[0]`…`msgstr[5]`. This is the argument against ever building plurals by string concatenation.
+
+Windows console detail: printing Arabic from a script dies with `UnicodeEncodeError: 'charmap' codec` because the console defaults to cp1252. `PYTHONIOENCODING=utf-8` fixes it. Nothing to do with the app.
 
 ## Admin
 
@@ -249,7 +312,7 @@ Caveat: PR #5 reported `BEHIND` and then went `CLEAN` with no branch update, whi
 
 ## Current state
 
-Working: the 2026 calendar grid (`home`), the `day` page with commitment create + list, the full auth flow, and the admin for both models. `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
+Working: the 2026 calendar grid (`home`), the `day` page with commitment create + list, the full auth flow, the admin for both models, and **English/Arabic translation with RTL** (see **Internationalization** above). `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
 
 `day` handles both GET and POST: `CommitmentForm` (a `ModelForm` on `text` alone) is saved with `commit=False` so the view can attach `user` and `date` before saving, then redirects to itself so a refresh doesn't resubmit. The list comes from `request.user.commitments` — the FK's `related_name`.
 
@@ -269,10 +332,11 @@ Three things there worth reusing:
 
 Not done yet:
 
-- **`home` is the only untested view.** `day` and registration are covered; the calendar grid is not.
+- **`home` is the only untested view.** `day` and registration are covered; the calendar grid is not — and it now carries the weekday rotation and the per-month `date` objects, so there is more in it to get wrong than there used to be.
+- **Nothing tests i18n at all.** Everything was verified by hand in throwaway scripts. The highest-value test is small: POST to `/i18n/setlang/` with `language=ar` as an **anonymous** user, then assert `dir="rtl"` in the response — that one guards the `login_not_required` wrapper on `set_language`, the same silent-lockout class as the `RegisterView` test.
 - **No CD.** There is CI but nothing deploys anywhere, and no host has been chosen.
-- **CI never checks that `output.css` is fresh.** Edit a template with the watcher off and a stale stylesheet merges silently. The check would be building it and `git diff --exit-code static/css/output.css`; `.gitattributes` now exists, so that is unblocked.
-- **i18n / l10n** — `USE_I18N` is on and the models already use `gettext_lazy`, but there is no `LocaleMiddleware`, no `LOCALE_PATHS`, no translated templates, and no `.po` files.
+- **CI never checks that `output.css` or `django.mo` is fresh.** Two generated-but-committed files with the same failure mode now: edit the source with the watcher off (or skip `compilemessages`) and a stale artifact merges silently. The check is building each and `git diff --exit-code` on it; `.gitattributes` covers both, so it is unblocked.
+- **Only `ar` is translated, and only the strings that existed on 2026-09-05.** Any new user-facing string needs marking, then `makemessages`, then `compilemessages`.
 - **`Commitment` cannot be edited or deleted** — create and list only. The interesting part of adding `UpdateView`/`DeleteView` is ownership: `LoginRequiredMiddleware` proves *someone* is logged in, not that they own the row, so without an explicit check user A can delete user B's commitment by guessing a UUID.
 - **`home` does not show which days have commitments.** Twelve months of bare numbers. One grouped query for the whole year (`values("date").annotate(Count("id"))`), not one per day — and complete class strings from the view, since `bg-{{ x }}-500` generates nothing.
 - **Telegram notifications (wanted).** Link a Telegram bot to the site and message a user when a commitment is coming up. Rough shape: a bot token from `@BotFather` kept in `.env` alongside `DJANGO_SECRET_KEY` (never committed — see **Environment variables**), a `telegram_chat_id` field on `CustomUser` plus some way for a user to link their account (the usual trick is the site showing a one-time code the user sends to the bot, since Telegram will not reveal a chat id otherwise), and a management command that queries commitments due in a window and posts to the Bot API.
@@ -280,6 +344,26 @@ Not done yet:
   **The real blocker is not the bot, it is that nothing runs on a schedule.** Everything here is request-driven; there is no host, no worker, no cron — so "when an event comes up" has nothing to fire it. A management command plus the host's scheduler is the simplest answer once there *is* a host, which makes this depend on **CD**. A scheduled GitHub Actions workflow could stand in for a cron, but it would need network access to a deployed database, so it does not dodge the dependency. Sending is the easy half: one HTTPS POST to `api.telegram.org`, no library required.
 
 `static/css/output.css` is **committed on purpose** — `collectstatic` copies that file, it does not generate it. Regenerating it makes it show up in `git status` constantly; that is expected, not a problem.
+
+## Session history (2026-09-05, part two — i18n)
+
+First session run from **PyCharm** rather than VS Code. Nothing needed installing: GNU gettext was already on `PATH`, and Claude Code is the same CLI in any terminal. Noted that PyCharm **autosaves** — on focus change, on running anything, and after ~15s idle — so there is no unsaved-file state to worry about; its replacement for "close without saving" is **Local History** (right-click a file → Local History), a git-independent timestamped diff. Also noted that the Django plugin (template syntax, `manage.py` console) is a Pro feature and is not in this install's bundled plugin list.
+
+Built the whole i18n/l10n feature in six steps, one at a time, verifying each: settings wiring → marking template strings → the month/weekday fix → `.po`/`.mo` → the switcher → RTL. The durable version of all of it is in **Internationalization** above.
+
+Snags, each a good lesson:
+
+- The `gettext_lazy` import **replaced** the three existing imports in `settings.py` instead of joining them, so `Path` was undefined. Lesson in reading a traceback: bottom-up, and the frame that matters is the deepest one *not* inside `site-packages`. Also that any error inside `settings.py` surfaces as a traceback about `settings.INSTALLED_APPS`, because that attribute access is what wakes the lazy settings object.
+- `LOCALE_PATHS = (BASE_DIR / "locale")` — **the tuple gotcha again**, same as `("text,")` → `admin.E126` last time. Parentheses don't make a tuple, the comma does. Django type-checks this particular setting at startup, which is luckier than it sounds: most settings aren't checked at all.
+- `from django.utils.dtaes import ...` — one transposed letter, forty frames of traceback.
+- `{% block heading %}` got pasted at the top of `auth_base.html` while the original remained, giving `'block' tag with name 'heading' appears more than once`.
+- `{{ month.name|date:"F" }}` after the view had switched the key to `date`. **Django resolves a missing context key to the empty string**, so this rendered twelve empty `<h2>`s: 200 OK, no error, tests green. Caught only by looking. This is `home` being the untested view, demonstrating itself.
+- The language switcher was first placed **inside** the `{% if user.is_authenticated %}` branch, which defeats the whole point of exempting `set_language` from `LoginRequiredMiddleware`. Found while tidying the nav.
+- `python manage.py check` **does not compile templates**, so it passed while three templates were broken. Rendering them is the only proof, which the six tests do for free.
+
+Worth repeating: three of these failed *silently* (the missing context key, the switcher in the wrong branch, an unmarked string), and none of the three would be caught by anything currently in the repo.
+
+Left at: PRs #16 → `develop` and #17 → `main`, both merged, back-merge done. Everything in **Internationalization** is live.
 
 ## Session history (2026-09-05)
 

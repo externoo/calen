@@ -7,16 +7,10 @@
     <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
         {% for month in months %}
         <section class="bg-white rounded-lg p-4 shadow">
-            <h2 class="text-lg font-semibold mb-4 text-center">{{ month.name }}</h2>
+            <h2 class="text-lg font-semibold mb-4 text-center">{{ month.date|date:"F" }}</h2>
 
             <div class="grid grid-cols-7 text-center text-xs text-slate-500 mb-1">
-                <div>Sun</div>
-                <div>Mon</div>
-                <div>Tue</div>
-                <div>Wed</div>
-                <div>Thu</div>
-                <div>Fri</div>
-                <div>Sat</div>
+                {%  for name in weekday_names %}<div>{{ name }}</div>{% endfor %}
             </div>
 
             {% for week in month.weeks %}

@@ -22,3 +22,4 @@ static/css/output.css linguist-generated=true
 *.woff binary
 *.woff2 binary
 *.sqlite3 binary
+*.mo binary
