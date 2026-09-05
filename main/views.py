@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect
 from django.utils.dates import WEEKDAYS_ABBR
+from .dates import MONTH_NAMES
 from .forms import CommitmentForm
 import calendar
 import datetime
@@ -16,7 +17,7 @@ def home(request):
     for month_number in range(1, 13):
         months.append({
             "number": month_number,
-            "date": datetime.date(year, month_number, 1),
+            "name": MONTH_NAMES[month_number],
             "weeks": cal.monthdayscalendar(year, month_number),
         })
     return render(request, 'main/home.html', {"year": year, "months": months, "weekday_names": weekday_names})
