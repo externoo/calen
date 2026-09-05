@@ -76,6 +76,19 @@ App-specific pages stay app-level and keep the namespace folder: `main\templates
 
 All three template roots — `templates\`, `main\templates\` and `accounts\templates\` — are listed as `@source` paths in `input.css`.
 
+## URLs
+
+Each app owns a `urls.py`, pulled in from `calen\urls.py` — which imports no app code at all any more, only names modules as strings:
+
+```python
+path('accounts/', include('accounts.urls')),
+path('', include('main.urls')),
+```
+
+**`main\urls.py` deliberately has no `app_name`**, so `home` and `day` stay un-namespaced; `accounts\urls.py` has one. The asymmetry is intentional and load-bearing: `app_name` does not *offer* a namespace, it **requires** one. Adding it to `main` would break `{% url 'home' %}` in the templates, `redirect("day", ...)` at the end of `main\views.py` and `reverse("day", ...)` in `DayViewTests` — all at once, all with `NoReverseMatch`. Namespacing `main` later is a deliberate change that updates every call site in the same commit.
+
+A root-mounted include (`path('', include(...))`) goes **last** in `urlpatterns`: it is the broadest pattern, and a greedy pattern placed first shadows everything below it.
+
 ## Auth (the `accounts` app)
 
 `accounts` owns the custom user and the whole login/registration flow.
@@ -246,19 +259,45 @@ Two idioms in there worth reusing. `Commitment.objects.get()` with **no argument
 
 The POST test's `user` and `date` assertions are the ones that earn their keep — they are the two fields nothing in the request sets, attached by hand between `save(commit=False)` and `save()`. Nothing asserts on `created_at`: it's `auto_now_add`, so testing it would be testing Django.
 
+`accounts\tests.py` holds `RegisterViewTests` — three more, covering the registration contract: the anonymous GET returns 200 (the `@login_not_required` regression test — lose that decorator and `LoginRequiredMiddleware` bounces every would-be signup to the login page, silently), a valid POST creating exactly one user and redirecting to `accounts:login`, and a mismatched-password POST creating none. Six tests total.
+
+Three things there worth reusing:
+
+- **The POST dictionary is the *form's* field names, not the model's** — `password1`/`password2` exist only on `UserCreationForm`, which compares them and produces the single hashed `password`. Get a name wrong and the form is merely invalid: 200, no user, no error raised.
+- **`check_password("...")`, never `assertEqual(user.password, "...")`.** The stored value is a PBKDF2 hash. That one line is what proves the password was hashed rather than saved raw.
+- **Assert the error *field*, not its wording.** `assertIn("password2", response.context["form"].errors)` rather than the message text, which contains a typographic apostrophe (U+2019, not ASCII `'`) *and* is translated — so a text assertion would break the moment `LocaleMiddleware` and `.po` files land. And use `objects.count() == 0` to assert absence: the no-argument `get()` idiom raises `DoesNotExist` there, which reports as a test **error** with a traceback rather than a clean failure.
+
 Not done yet:
 
-- **Tests cover the `day` view only.** `home` is untested, and so is the whole of `accounts` — `accounts\tests.py` is still the empty stub. Registration is the interesting target there: it is the one view carrying `@login_not_required`, so a regression would lock every new user out silently.
+- **`home` is the only untested view.** `day` and registration are covered; the calendar grid is not.
 - **No CD.** There is CI but nothing deploys anywhere, and no host has been chosen.
 - **CI never checks that `output.css` is fresh.** Edit a template with the watcher off and a stale stylesheet merges silently. The check would be building it and `git diff --exit-code static/css/output.css`; `.gitattributes` now exists, so that is unblocked.
 - **i18n / l10n** — `USE_I18N` is on and the models already use `gettext_lazy`, but there is no `LocaleMiddleware`, no `LOCALE_PATHS`, no translated templates, and no `.po` files.
-- `main` still has no `urls.py`; its two routes are wired directly in `calen\urls.py`.
-- Missing trailing newlines in `main\views.py`, `main\forms.py`, `main\admin.py`, `accounts\admin.py` (`\ No newline at end of file` in diffs). Cosmetic, but it makes future diffs noisier.
+- **`Commitment` cannot be edited or deleted** — create and list only. The interesting part of adding `UpdateView`/`DeleteView` is ownership: `LoginRequiredMiddleware` proves *someone* is logged in, not that they own the row, so without an explicit check user A can delete user B's commitment by guessing a UUID.
+- **`home` does not show which days have commitments.** Twelve months of bare numbers. One grouped query for the whole year (`values("date").annotate(Count("id"))`), not one per day — and complete class strings from the view, since `bg-{{ x }}-500` generates nothing.
 - **Telegram notifications (wanted).** Link a Telegram bot to the site and message a user when a commitment is coming up. Rough shape: a bot token from `@BotFather` kept in `.env` alongside `DJANGO_SECRET_KEY` (never committed — see **Environment variables**), a `telegram_chat_id` field on `CustomUser` plus some way for a user to link their account (the usual trick is the site showing a one-time code the user sends to the bot, since Telegram will not reveal a chat id otherwise), and a management command that queries commitments due in a window and posts to the Bot API.
 
   **The real blocker is not the bot, it is that nothing runs on a schedule.** Everything here is request-driven; there is no host, no worker, no cron — so "when an event comes up" has nothing to fire it. A management command plus the host's scheduler is the simplest answer once there *is* a host, which makes this depend on **CD**. A scheduled GitHub Actions workflow could stand in for a cron, but it would need network access to a deployed database, so it does not dodge the dependency. Sending is the easy half: one HTTPS POST to `api.telegram.org`, no library required.
 
 `static/css/output.css` is **committed on purpose** — `collectstatic` copies that file, it does not generate it. Regenerating it makes it show up in `git status` constantly; that is expected, not a problem.
+
+## Session history (2026-09-05)
+
+Cleared the whole "small stuff" list: tests for `accounts`, then the two chores. Four PRs, two full trips through the release loop, no surprises.
+
+**Registration tests** (PRs #10 → `develop`, #11 → `main`). Built one test at a time, running each before writing the next. Watched the first one *fail* on purpose by commenting out `@method_decorator(login_not_required, name="dispatch")` — `302 != 200`, exactly the silent lockout the test exists to catch. The durable lessons are folded into **Current state** above: form field names vs model field names, `check_password` over comparing the raw string, asserting the error field rather than its translated text, and `count() == 0` over `get()` for absence.
+
+Also covered: why `User = get_user_model()` at module level is fine in a test module (the runner imports it after `django.setup()`) but a hazard in `models.py`, where it can fire before the app registry is ready — the same import-time/call-time split as `reverse` vs `reverse_lazy`.
+
+**The two chores** (PRs #12 → `develop`, #13 → `main`), deliberately two commits on one branch. Trailing newlines first: `for f in ...; do printf '\n' >> "$f"; done`. The diff came back `4 insertions(+), 4 deletions(-)` rather than four pure insertions, which *is* the argument for the fix — appending the byte rewrites the last line, so git shows it deleted and re-added. Then `main\urls.py`, with the `app_name` trap explained before anything was written; see the new **URLs** section.
+
+Two small process notes. The newly created `main\urls.py` was itself missing a trailing newline — spotted because `cat` ran the closing `]` straight into the next `echo` marker on the same line, which is the tell. `tail -c 1 <file> | xxd` is the check: `0a` good, anything else missing. PyCharm's **Settings → Editor → General → On Save → "Ensure every saved file ends with a line break"** stops it recurring. And `git add <file>` by name mattered here: `main\urls.py` was untracked, and `git commit -a` never stages untracked files — committing the `include('main.urls')` without the module would have been an instant `ModuleNotFoundError` in CI.
+
+Predictions made before running, all confirmed: both release PRs opened `BLOCKED` + `MERGEABLE` (never `BEHIND`, because the previous back-merge had levelled the branches) and flipped to `CLEAN` on their own when `test` passed, with nothing done to unblock them. The PR into ungated `develop` showed `CLEAN`/`UNSTABLE` on the same kind of pending check. Both back-merges were fast-forwards. `gh pr checks` shows two runs per PR — the `on: push` one testing the branch tip and the `on: pull_request` one testing the simulated merge; the ruleset gates on the second.
+
+Left at: `develop` and `origin/main` both at `8283f21`, `git log develop..origin/main` and the reverse both empty, working tree clean, thirteen PRs, four stale remote-tracking branches pruned. Local `main` is a stale pointer at `2d4b421` — harmless, since nothing is ever committed there; `git fetch origin main:main` freshens it without a checkout.
+
+Next: features, which are now the whole gap. `home` marking days that have commitments is the smallest user-visible win and the natural next step; edit/delete for `Commitment` is the one that needs an ownership check. See **Current state**.
 
 ## Session history (2026-09-04)
 
