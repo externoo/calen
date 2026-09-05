@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect
+from django.utils.dates import WEEKDAYS_ABBR
 from .forms import CommitmentForm
 import calendar
 import datetime
@@ -6,16 +7,19 @@ import datetime
 # Create your views here.
 def home(request):
     year = 2026
-    cal = calendar.Calendar(firstweekday=6)  
+    firstweekday = 6
+    cal = calendar.Calendar(firstweekday=firstweekday)
+
+    weekday_names = [WEEKDAYS_ABBR[(firstweekday + offset) % 7] for offset in range(7)]
 
     months = []
     for month_number in range(1, 13):
         months.append({
             "number": month_number,
-            "name": calendar.month_name[month_number],
+            "date": datetime.date(year, month_number, 1),
             "weeks": cal.monthdayscalendar(year, month_number),
         })
-    return render(request, 'main/home.html', {"year": year, "months": months})
+    return render(request, 'main/home.html', {"year": year, "months": months, "weekday_names": weekday_names})
 
 def day(request, year, month, day):
     date = datetime.date(year, month, day)
