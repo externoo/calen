@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-05 17:11+0300\n"
+"POT-Creation-Date: 2026-09-07 16:30+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -111,15 +111,47 @@ msgstr "أُنشئ في"
 msgid "commitments"
 msgstr "التزامات"
 
+#: .\main\templates\main\commitment_confirm_delete.html:4
+#: .\main\templates\main\commitment_confirm_delete.html:8
+msgid "Delete commitment"
+msgstr "حذف الالتزام"
+
+#: .\main\templates\main\commitment_confirm_delete.html:10
+msgid "Are you sure you want to delete this commitment?"
+msgstr "هل أنت متأكد من أنك تريد حذف هذا الالتزام؟"
+
+#: .\main\templates\main\commitment_confirm_delete.html:17
+#: .\main\templates\main\day.html:25
+msgid "Delete"
+msgstr "حذف"
+
+#: .\main\templates\main\commitment_confirm_delete.html:19
+#: .\main\templates\main\commitment_form.html:19
+msgid "Cancel"
+msgstr "إلغاء"
+
+#: .\main\templates\main\commitment_form.html:4
+#: .\main\templates\main\commitment_form.html:8
+msgid "Edit commitment"
+msgstr "تعديل الالتزام"
+
+#: .\main\templates\main\commitment_form.html:15
+msgid "Save"
+msgstr "حفظ"
+
 #: .\main\templates\main\day.html:14
 msgid "Add"
 msgstr "إضافة"
 
-#: .\main\templates\main\day.html:21
+#: .\main\templates\main\day.html:23
+msgid "Edit"
+msgstr "تعديل"
+
+#: .\main\templates\main\day.html:29
 msgid "Nothing committed for this day yet."
 msgstr "لا توجد التزامات لهذا اليوم بعد."
 
-#: .\main\templates\main\day.html:24
+#: .\main\templates\main\day.html:32
 #, python-format
 msgid "Back to %(year)s"
 msgstr "العودة إلى %(year)s"
