@@ -23,3 +23,43 @@ jobs:
         - run: python manage.py check
 
         - run: python manage.py test
+
+    # Rebuilds the two generated-but-committed artifacts and fails if either
+    # differs from what is in the tree. Deliberately NOT a required status
+    # check: it pulls in npm and apt, whose failure modes are uncorrelated
+    # with whether the code is correct. It reports, it does not gate.
+    artifacts:
+      runs-on: ubuntu-latest
+
+      env:
+        DJANGO_SECRET_KEY: not-a-real-key-only-for-ci
+
+      steps:
+        - uses: actions/checkout@v5
+
+        # --- static/css/output.css ---------------------------------------
+        - run: npm ci
+
+        - run: npm run build:css
+
+        - name: output.css is up to date
+          run: git diff --exit-code -- static/css/output.css
+
+        # --- locale/*/LC_MESSAGES/django.mo -------------------------------
+        - uses: actions/setup-python@v6
+          with:
+            python-version: "3.13"
+
+        - run: pip install -r requirements.txt
+
+        - run: sudo apt-get update && sudo apt-get install -y gettext
+
+        # compilemessages skips a .po whose .mo is newer, and git does not
+        # preserve mtimes - so the .mo must go before it will actually rebuild.
+        - name: Recompile the message catalogues
+          run: |
+            find locale -name '*.mo' -delete
+            python manage.py compilemessages
+
+        - name: django.mo is up to date
+          run: git diff --exit-code -- 'locale/**/*.mo'
