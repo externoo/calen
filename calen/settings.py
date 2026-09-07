@@ -155,6 +155,10 @@ STATICFILES_DIRS = [
 
 AUTH_USER_MODEL = 'accounts.CustomUser'
 
+# Optional, unlike DJANGO_SECRET_KEY: the site runs perfectly without a bot.
+# The management commands that need it raise ImproperlyConfigured themselves.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
 LOGIN_URL = 'accounts:login'
 LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'home'
