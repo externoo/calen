@@ -246,6 +246,50 @@ Worth knowing:
 - **`python manage.py check` runs the admin checks** without a browser or server, and returns a stable `admin.Exxx` code that is searchable in the docs. Reach for it first when the admin misbehaves. (`runserver` runs the same checks, so a bad admin config stops the server outright rather than failing per-request.)
 - Tuple gotcha, hit once already: `("text",)` is a one-tuple; `("text,")` is a string and yields `admin.E126`. Parentheses don't make a tuple — the comma does.
 
+## Telegram notifications
+
+Sending works and is live; **scheduling is the part that does not exist yet.**
+
+`main\telegram.py` is a ~60-line Bot API client over `urllib` — deliberately
+not `requests`, so `requirements.txt` stays Django alone. Two management
+commands use it:
+
+- `python manage.py telegram_whoami` — prints the chat id of anyone who has
+  messaged the bot recently, read out of `getUpdates`.
+- `python manage.py send_reminders [--days N] [--dry-run]` — one message per
+  user listing their commitments for that day. `--days` defaults to 1
+  (tomorrow). This is the thing a scheduler would run once a day.
+
+`CustomUser.telegram_chat_id` is a blank-able `CharField`, set by hand in the
+admin for now. Things worth holding on to:
+
+- **Telegram will not reveal a chat id on request.** The user has to message
+  the bot first; `getUpdates` is then the only way to read it back, and it
+  only keeps about 24 hours of history. Any automated linking flow (a
+  one-time code the user sends to the bot) is built on top of that same
+  constraint, not around it.
+- **`TELEGRAM_BOT_TOKEN` is optional**, unlike `DJANGO_SECRET_KEY` which
+  refuses to import without a value. The site runs fine with no bot; the two
+  commands raise `ImproperlyConfigured` themselves when it is missing.
+- **Adding a field to `CustomUser` does not put it in the admin.**
+  `UserAdmin.fieldsets` is an explicit list of field names, so a new field is
+  simply absent from the form — no error, no warning. `accounts\admin.py`
+  therefore now subclasses `UserAdmin` and appends a Telegram fieldset, which
+  changes the "nothing subclassed" note under **Admin** above. Subclassing
+  `UserAdmin` is still essential; it is a plain `ModelAdmin` that is dangerous.
+- **Telegram is mocked in the tests** (`patch("main.telegram.send_message")`).
+  They test our filtering and grouping, never the Bot API, and must never make
+  a network call. Verified by removing the `exclude(telegram_chat_id="")` and
+  watching `test_users_without_a_chat_id_are_skipped` fail.
+
+**The blocker remains CD.** Everything here is request-driven; there is no
+host, no worker, no cron, so nothing fires `send_reminders`. Chosen target:
+**PythonAnywhere free tier** — free without a card, Django-native, scheduled
+tasks included on the free plan, and `api.telegram.org` is on its free-account
+allowlist (free accounts are proxy-restricted to a whitelist; that one is on
+it). Render's free web services spin down after 15 minutes; Railway and Fly
+are credit/trial models now.
+
 ## Git workflow
 
 Three kinds of branch, each with a different job:
@@ -400,9 +444,16 @@ Not done yet:
 - **No CD.** There is CI but nothing deploys anywhere, and no host has been chosen.
 - **CI never checks that `output.css` or `django.mo` is fresh.** Two generated-but-committed files with the same failure mode now: edit the source with the watcher off (or skip `compilemessages`) and a stale artifact merges silently. The check is building each and `git diff --exit-code` on it; `.gitattributes` covers both, so it is unblocked.
 - **Only `ar` is translated, and only the strings that existed on 2026-09-05.** Any new user-facing string needs marking, then `makemessages`, then `compilemessages`.
-- **Telegram notifications (wanted).** Link a Telegram bot to the site and message a user when a commitment is coming up. Rough shape: a bot token from `@BotFather` kept in `.env` alongside `DJANGO_SECRET_KEY` (never committed — see **Environment variables**), a `telegram_chat_id` field on `CustomUser` plus some way for a user to link their account (the usual trick is the site showing a one-time code the user sends to the bot, since Telegram will not reveal a chat id otherwise), and a management command that queries commitments due in a window and posts to the Bot API.
-
-  **The real blocker is not the bot, it is that nothing runs on a schedule.** Everything here is request-driven; there is no host, no worker, no cron — so "when an event comes up" has nothing to fire it. A management command plus the host's scheduler is the simplest answer once there *is* a host, which makes this depend on **CD**. A scheduled GitHub Actions workflow could stand in for a cron, but it would need network access to a deployed database, so it does not dodge the dependency. Sending is the easy half: one HTTPS POST to `api.telegram.org`, no library required.
+- **Telegram reminders have no scheduler.** Sending works (see **Telegram
+  notifications** above) but nothing runs it on a clock. This is the whole
+  remaining gap, and it is **CD**: pick a host, deploy, point its scheduler at
+  `manage.py send_reminders`. PythonAnywhere's free tier is the chosen target.
+- **Linking a Telegram account is manual** — paste a chat id into the admin.
+  The multi-user version is a one-time code shown on a page, sent to the bot,
+  matched by a polling command.
+- **`main\telegram.py` has no tests of its own.** The commands are covered
+  with the network mocked; the client's own error handling (Telegram's JSON
+  4xx bodies) is not.
 
 `static/css/output.css` is **committed on purpose** — `collectstatic` copies that file, it does not generate it. Regenerating it makes it show up in `git status` constantly; that is expected, not a problem.
 
