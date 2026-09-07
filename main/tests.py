@@ -1,5 +1,10 @@
 import datetime
+from io import StringIO
+from unittest.mock import patch
+
+from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from .models import Commitment
@@ -98,3 +103,62 @@ class CommitmentEditDeleteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "main/commitment_confirm_delete.html")
         self.assertEqual(Commitment.objects.count(), 1)
+
+
+class SendRemindersTests(TestCase):
+    """The scheduled job. Telegram itself is mocked - these test our logic,
+    not the Bot API, and must never make a network call."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.linked = User.objects.create_user(
+            username="linked", password="pw-for-tests-only", telegram_chat_id="111"
+        )
+        self.unlinked = User.objects.create_user(
+            username="unlinked", password="pw-for-tests-only"
+        )
+        self.tomorrow = timezone.localdate() + datetime.timedelta(days=1)
+
+    def test_sends_one_message_per_user_listing_all_their_commitments(self):
+        Commitment.objects.create(user=self.linked, date=self.tomorrow, text="First")
+        Commitment.objects.create(user=self.linked, date=self.tomorrow, text="Second")
+
+        with patch("main.telegram.send_message") as send:
+            call_command("send_reminders", stdout=StringIO())
+
+        send.assert_called_once()
+        chat_id, text = send.call_args.args
+        self.assertEqual(chat_id, "111")
+        self.assertIn("First", text)
+        self.assertIn("Second", text)
+
+    def test_users_without_a_chat_id_are_skipped(self):
+        Commitment.objects.create(user=self.unlinked, date=self.tomorrow, text="Nope")
+
+        with patch("main.telegram.send_message") as send:
+            call_command("send_reminders", stdout=StringIO())
+
+        send.assert_not_called()
+
+    def test_only_the_target_day_is_included(self):
+        Commitment.objects.create(user=self.linked, date=self.tomorrow, text="Soon")
+        Commitment.objects.create(
+            user=self.linked,
+            date=self.tomorrow + datetime.timedelta(days=3),
+            text="Later",
+        )
+
+        with patch("main.telegram.send_message") as send:
+            call_command("send_reminders", stdout=StringIO())
+
+        text = send.call_args.args[1]
+        self.assertIn("Soon", text)
+        self.assertNotIn("Later", text)
+
+    def test_dry_run_sends_nothing(self):
+        Commitment.objects.create(user=self.linked, date=self.tomorrow, text="First")
+
+        with patch("main.telegram.send_message") as send:
+            call_command("send_reminders", "--dry-run", stdout=StringIO())
+
+        send.assert_not_called()
