@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Edit commitment" %}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl p-10">
+  <h1 class="text-3xl font-bold">{% translate "Edit commitment" %}</h1>
+  <p class="mt-2 text-slate-600">{{ commitment.date|date:"l, j F Y" }}</p>
+
+  <form method="post" class="mt-6">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button type="submit" class="bg-amber-700 hover:bg-fuchsia-700
+      transition-colors text-white p-2 rounded-sm">{% translate "Save" %}</button>
+  </form>
+
+  <a href="{% url 'day' commitment.date.year commitment.date.month commitment.date.day %}"
+     class="inline-block mt-8 bg-amber-700 hover:bg-fuchsia-700 transition-colors text-white p-2 rounded-sm">{% translate "Cancel" %}</a>
+</div>
+{% endblock %}

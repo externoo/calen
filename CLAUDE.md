@@ -81,6 +81,8 @@ Consequences worth internalizing:
 
 App-specific pages stay app-level and keep the namespace folder: `main\templates\main\home.html`, referenced as `"main/home.html"`. `DIRS` is searched before app folders, so a project-level file of the same name overrides an app's (including Django admin's own templates).
 
+**In a template that `{% extends %}` another, anything outside a `{% block %}` is silently discarded.** The child does not control page structure — it only supplies block contents — so stray markup below the final `{% endblock %}` renders as nothing at all. No error, no warning, no output. This has already cost a debugging round: a `<li>` pasted into the wrong template landed after its `{% endblock %}` and vanished, and the symptom was indistinguishable from "the edit never happened".
+
 All three template roots — `templates\`, `main\templates\` and `accounts\templates\` — are listed as `@source` paths in `input.css`.
 
 ## URLs
@@ -114,6 +116,20 @@ Consequences:
 - **A new public view must be decorated** `@login_not_required`, or `@method_decorator(login_not_required, name="dispatch")` for a CBV. `RegisterView` carries this — without it nobody could ever sign up.
 - Django's own auth views (`LoginView`, `LogoutView`, the password-reset set) and `AdminSite.login` already carry the decorator upstream, so they keep working untouched.
 - The redirect preserves `?next=`, so a deep link survives the login round-trip.
+
+### Login is not ownership
+
+`LoginRequiredMiddleware` proves *someone* is logged in. It never proves that person may touch the row they asked for. Every view that reads or writes a specific `Commitment` has to establish that itself, and the project does it **in the query**, never as a check afterwards:
+
+```python
+commitment = get_object_or_404(Commitment, pk=pk, user=request.user)
+```
+
+The row is found only if the UUID matches *and* it belongs to the requester. `day` and `home` do the same thing in the other spelling — `request.user.commitments.filter(...)`.
+
+- **404, not 403.** A 403 admits the row exists, which lets someone probing UUIDs map what is real. A 404 says "no such thing", which is what a stranger should get.
+- **Drop `user=request.user` and nothing anywhere complains.** Every page still works, in the browser, forever. On `commitment_edit` that is data corruption; on `commitment_delete` it is destruction. The two ownership tests in `CommitmentEditDeleteTests` are the only guard, and they were watched failing (`302 != 404` — the delete *succeeded*) before being trusted.
+- **Scope in the query, never fetch-then-check.** `get()` followed by `if obj.user != request.user` is one early `return` away from being wrong, and it has already loaded the row.
 
 ### Two gotchas that cost time
 
@@ -160,9 +176,26 @@ There is **no `USE_L10N`** — removed in Django 5.0. Locale-aware date and numb
 
 Python's stdlib `calendar` reads the **C locale**, which Django never sets. `month_name[1]` is `"January"` in every language, silently. Same for `day_abbr`.
 
-The fix is to route through Django's own catalogue, which already contains all nineteen names in Arabic: the view passes a `date` object per month and the template formats it with `{{ month.date|date:"F" }}`, and weekday headers come from `django.utils.dates.WEEKDAYS_ABBR` (a dict keyed `0`=Monday, values `gettext_lazy`). **Nineteen translations for free, and none of them in our `.po`.**
+The fix is to route through Django's own catalogue, which already contains all nineteen names in Arabic. Weekday headers come from `django.utils.dates.WEEKDAYS_ABBR` (a dict keyed `0`=Monday, values `gettext_lazy`). Month names were first done the same way — a `date` object per month, formatted `{{ month.date|date:"F" }}` — and then replaced by `MONTH_NAMES` from `main\dates.py`, rendered as `{{ month.name }}`, once those names were being overridden anyway (see **Overriding Django's own translations** below). **Seven translations for free, and twelve deliberately ours.**
 
 `WEEKDAYS_ABBR` is rotated by `(firstweekday + offset) % 7` rather than hardcoded, so the header row cannot drift out of step with `Calendar(firstweekday=...)`.
+
+### `makemessages` guesses, and marks its guesses `fuzzy`
+
+When a rescan finds a new `msgid` resembling an existing one, `msgmerge` copies the old translation across and flags the entry:
+
+```po
+#, fuzzy
+#| msgid "Edit commitment"
+msgid "Delete commitment"
+msgstr "..."
+```
+
+The `#|` line records what it guessed *from*. Both guesses so far have been wrong, the second dangerously: the Arabic it pasted in meant "edit", so clearing that flag unread would have headed the **delete confirmation page** with "Edit commitment".
+
+**`msgfmt` excludes fuzzy entries from the `.mo`**, so an unreviewed guess ships as English rather than as a lie — it fails safe, but silently. `grep -c fuzzy` on the `.po` after every `makemessages` run is the check; the target is `0` before `compilemessages`.
+
+The other half of the same mechanism is the good half: **a rescan merges, it does not overwrite.** Translations already filled in survive, and only genuinely new `msgid`s come back with `msgstr ""`. So running `makemessages` twice in a session costs nothing.
 
 ### Overriding Django's own translations
 
@@ -323,17 +356,36 @@ Caveat: PR #5 reported `BEHIND` and then went `CLEAN` with no branch update, whi
 
 ## Current state
 
-Working: the 2026 calendar grid (`home`), the `day` page with commitment create + list, the full auth flow, the admin for both models, and **English/Arabic translation with RTL** (see **Internationalization** above). `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
+Working: the 2026 calendar grid (`home`), **marking the days that have commitments**, the `day` page with commitment create + list, the full auth flow, the admin for both models, and **English/Arabic translation with RTL** (see **Internationalization** above). `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
+
+`home` fetches the marked days in **one** query — `set(request.user.commitments.filter(date__year=year).values_list("date", flat=True))` — and then passes each day cell as `{"number": n, "busy": bool}`, or `None` for the padding days `monthdayscalendar` returns as `0`. `None` is falsy, so the template's pre-existing `{% if day %}` blank-cell branch needed no edit.
+
+Three decisions in there worth keeping:
+
+- **The set is built once, outside the day loop.** The alternative — a query per day — is 365 per page load, and on a dev database with three rows it looks and feels identical. Query count is not visible by looking.
+- **`request.user.commitments` is what scopes it.** `LoginRequiredMiddleware` proves *someone* is logged in, never *whose* rows you may read. Here that is a privacy leak rather than the security hole it would be for edit/delete, but it is the same missing check.
+- **The view passes a boolean; the template picks between two complete class strings.** The rule is not "class strings must come from the view" — it is that Tailwind must see every class as literal text in a file it scans, and `input.css` only `@source`s the three template folders. A class string written in `views.py` would generate nothing, silently, until an `@source "../../main/views.py"` line was added. Worth paying for many variants (shading by commitment count); not worth it for two states.
+
 
 `day` handles both GET and POST: `CommitmentForm` (a `ModelForm` on `text` alone) is saved with `commit=False` so the view can attach `user` and `date` before saving, then redirects to itself so a refresh doesn't resubmit. The list comes from `request.user.commitments` — the FK's `related_name`.
 
-`main\tests.py` holds `DayViewTests` — three tests covering the whole `day` contract: the anonymous redirect to login, the logged-in GET (status, template, `date` in context), and the POST (a `Commitment` row is created with the right `user` and `date`, and the response redirects back to the same URL).
+`commitment_edit` and `commitment_delete` are function views on `commitment/<uuid:pk>/edit|delete/`, both opening with the ownership lookup described in **Login is not ownership** above. Three things in them worth keeping:
+
+- **`instance=commitment` appears in both branches of `commitment_edit`, doing a different job in each.** On GET it pre-fills the form; on POST it tells `form.save()` to *update this row*. Omit it from the POST branch and the view silently **creates a second commitment** instead of editing — same 302, same redirect, and the only assertion that catches it is `Commitment.objects.count() == 1`. No `commit=False` here, unlike `day`: the instance already carries `user` and `date`.
+- **`commitment_delete` splits GET and POST.** GET renders a confirmation page and changes nothing; POST deletes and redirects. Deleting on GET would let a crawler, a prefetch or a link preview destroy rows — the same reasoning that makes logout POST-only and `set_language` ignore GET. The link on `day.html` is therefore a plain `<a>` to the *confirmation* page, and only the form on that page mutates.
+- **`<uuid:pk>` is a filter, not just a parser.** `/commitment/hello/edit/` never reaches the view — the resolver 404s. Without the converter the view would hand a string to the ORM and raise `ValidationError`: a 500 where a 404 belongs.
+
+`main\tests.py` holds `DayViewTests` and `CommitmentEditDeleteTests`. `DayViewTests` is three tests covering the whole `day` contract: the anonymous redirect to login, the logged-in GET (status, template, `date` in context), and the POST (a `Commitment` row is created with the right `user` and `date`, and the response redirects back to the same URL).
 
 Two idioms in there worth reusing. `Commitment.objects.get()` with **no arguments** asserts "exactly one row exists" *and* returns it — `DoesNotExist` for zero, `MultipleObjectsReturned` for more — which only works because `TestCase` wraps each method in a transaction and rolls it back, so every test starts with empty tables and a fresh `setUp` user. And `assertRedirects` doesn't just check the 302: it follows the redirect and asserts the target returns 200, so it proves the destination is real (which needs the client to still be logged in).
 
 The POST test's `user` and `date` assertions are the ones that earn their keep — they are the two fields nothing in the request sets, attached by hand between `save(commit=False)` and `save()`. Nothing asserts on `created_at`: it's `auto_now_add`, so testing it would be testing Django.
 
-`accounts\tests.py` holds `RegisterViewTests` — three more, covering the registration contract: the anonymous GET returns 200 (the `@login_not_required` regression test — lose that decorator and `LoginRequiredMiddleware` bounces every would-be signup to the login page, silently), a valid POST creating exactly one user and redirecting to `accounts:login`, and a mismatched-password POST creating none. Six tests total.
+`accounts\tests.py` holds `RegisterViewTests` — three more, covering the registration contract: the anonymous GET returns 200 (the `@login_not_required` regression test — lose that decorator and `LoginRequiredMiddleware` bounces every would-be signup to the login page, silently), a valid POST creating exactly one user and redirecting to `accounts:login`, and a mismatched-password POST creating none. **Eleven tests total.**
+
+`CommitmentEditDeleteTests` is the other five, and its `setUp` creates **two** users — without a second one the thing worth testing cannot be expressed. Owner-can-edit (asserting `count() == 1`, which is what catches a missing `instance=`), owner-can-delete, and then the three that are the point: `other` gets a 404 on edit *and the text is unchanged*, `other` gets a 404 on delete *and the row survives*, and a GET on the delete URL returns the confirmation page while deleting nothing.
+
+Two habits from it: **assert the database, not just the status code** — a view can reject *after* writing, so `refresh_from_db()` plus a value check is what proves nothing happened — and **`count()` for absence rather than the no-argument `get()`**, since `get()` raises `DoesNotExist` and reports as a test error with a traceback instead of a clean failure.
 
 Three things there worth reusing:
 
@@ -343,18 +395,61 @@ Three things there worth reusing:
 
 Not done yet:
 
-- **`home` is the only untested view.** `day` and registration are covered; the calendar grid is not — and it now carries the weekday rotation and the per-month `date` objects, so there is more in it to get wrong than there used to be.
+- **`home` is the only untested view, and now the one with the most in it.** `day` and registration are covered; the calendar grid is not — and it carries the weekday rotation, the `MONTH_NAMES` lookup, the `marked_dates` query and the per-day `busy` flag. Three of those fail silently. The test that earns its keep first: create a commitment for user A, log in as user B, and assert B's grid does not mark that day — the `request.user.commitments` scope is a privacy boundary with nothing guarding it.
 - **Nothing tests i18n at all.** Everything was verified by hand in throwaway scripts. The highest-value test is small: POST to `/i18n/setlang/` with `language=ar` as an **anonymous** user, then assert `dir="rtl"` in the response — that one guards the `login_not_required` wrapper on `set_language`, the same silent-lockout class as the `RegisterView` test.
 - **No CD.** There is CI but nothing deploys anywhere, and no host has been chosen.
 - **CI never checks that `output.css` or `django.mo` is fresh.** Two generated-but-committed files with the same failure mode now: edit the source with the watcher off (or skip `compilemessages`) and a stale artifact merges silently. The check is building each and `git diff --exit-code` on it; `.gitattributes` covers both, so it is unblocked.
 - **Only `ar` is translated, and only the strings that existed on 2026-09-05.** Any new user-facing string needs marking, then `makemessages`, then `compilemessages`.
-- **`Commitment` cannot be edited or deleted** — create and list only. The interesting part of adding `UpdateView`/`DeleteView` is ownership: `LoginRequiredMiddleware` proves *someone* is logged in, not that they own the row, so without an explicit check user A can delete user B's commitment by guessing a UUID.
-- **`home` does not show which days have commitments.** Twelve months of bare numbers. One grouped query for the whole year (`values("date").annotate(Count("id"))`), not one per day — and complete class strings from the view, since `bg-{{ x }}-500` generates nothing.
 - **Telegram notifications (wanted).** Link a Telegram bot to the site and message a user when a commitment is coming up. Rough shape: a bot token from `@BotFather` kept in `.env` alongside `DJANGO_SECRET_KEY` (never committed — see **Environment variables**), a `telegram_chat_id` field on `CustomUser` plus some way for a user to link their account (the usual trick is the site showing a one-time code the user sends to the bot, since Telegram will not reveal a chat id otherwise), and a management command that queries commitments due in a window and posts to the Bot API.
 
   **The real blocker is not the bot, it is that nothing runs on a schedule.** Everything here is request-driven; there is no host, no worker, no cron — so "when an event comes up" has nothing to fire it. A management command plus the host's scheduler is the simplest answer once there *is* a host, which makes this depend on **CD**. A scheduled GitHub Actions workflow could stand in for a cron, but it would need network access to a deployed database, so it does not dodge the dependency. Sending is the easy half: one HTTPS POST to `api.telegram.org`, no library required.
 
 `static/css/output.css` is **committed on purpose** — `collectstatic` copies that file, it does not generate it. Regenerating it makes it show up in `git status` constantly; that is expected, not a problem.
+
+## Session history (2026-09-07, part two — edit/delete)
+
+The ownership session, finally. Three hours booked, and it fit with room to spare. Started by walking back through the `home` marking feature line by line — every variable in the view, where each one is born, and the four ways a name comes into existence in Python (imported, parameter, `=`, or created by a `for` statement). Worth recording that the question that prompted it was "where did `week` come from" — the answer being that **a `for` line is what creates its loop variable**, not merely what repeats.
+
+Chose function views over `UpdateView`/`DeleteView` deliberately. CBVs are less code, but they hide the ownership check inside an overridden `get_queryset()`, and the entire point of the feature was to *see* the one line that stops user A touching user B's row. The refactor to CBVs is now safe to attempt at any time, because the five tests would catch it breaking.
+
+Order of work: view → URL → template, in that order and for a reason — `main\urls.py` does `from . import views` and names `views.commitment_edit`, so adding the path first is an `AttributeError` at import time and the dev server won't start.
+
+Also decided *not* to add the category dropdown yet, though it was asked about. The two tasks barely touch: `CommitmentForm` is a `ModelForm`, so a new model field listed in `Meta.fields` appears in every template rendering that form automatically — the edit page would pick up the dropdown for free. Ordering was therefore free, and edit/delete had the security lesson in it. Noted for when it happens: if categories ever colour the *calendar grid*, that is the many-variants case where class strings should move into `views.py` plus an `@source` line.
+
+Snags:
+
+- **An extra leading space on a paste**, so `def commitment_delete` sat at column 1 with a 6-space body. `IndentationError: unindent does not match any outer indentation level` — which specifically means *inconsistent*, not "too much"; Python found no enclosing block open at that column. Forty frames of traceback, and the three useful lines were at the bottom, below all the `site-packages` ones. Second time this project has needed the read-it-bottom-up rule.
+- **A paste landed in the wrong file again** — the `day.html` `<li>` block went into `commitment_confirm_delete.html`, carrying the instruction sentence "Second, in day.html, replace…" in as literal text. This is the third session running with that failure mode (Python into `home.html` last time). What made it invisible here is now written up under **Templates**: it landed *below* the final `{% endblock %}`, and an extending template silently discards everything outside a block. No error, no stray text on the page, nothing.
+- **`makemessages` fuzzy-matched twice**, the second time dangerously — see **`makemessages` guesses** above.
+
+The part worth keeping: **the tests were watched failing before being trusted.** Stripping `user=request.user` from both views turned two tests red with `AssertionError: 302 != 404` — a 302 meaning the delete had *succeeded* for a stranger. Green tests prove nothing until you have seen them go red for the right reason; this is the same exercise as commenting out `@login_not_required` on `RegisterView` two sessions ago, and it should probably become the habit for anything security-shaped.
+
+Eleven tests now, up from six.
+
+Left at: feature complete, translated (seven new strings, zero fuzzy), documented, and shipped through the full release loop.
+
+Next: `home` is *still* the only untested view, and it is now three sessions running that it has demonstrated why. The privacy test named in **Current state** is the one to write first. Then the category dropdown, which is a model field plus a migration plus a translation cycle.
+
+## Session history (2026-09-07, part one — home marking)
+
+A deliberately time-boxed session — 45 minutes — so the first decision was which task fits. Ranked the three open features by length rather than value: the i18n test (~15 min, one method in an existing file), `home` marking commitment days (~45, view + template + Tailwind), edit/delete (a session of its own, because of the ownership check). Picked the middle one. It fit, including the full release loop, with time left for the docs.
+
+The feature itself is in **Current state** above. Six steps: branch → the query → the cell restructure → the template → look at it → ship.
+
+Snags, and all four are the *same* failure mode — a command or a paste that succeeded while doing nothing useful:
+
+- **The `marked_dates` snippet went into `home.html` instead of `views.py`** and rendered as visible text on the page. A Django template interprets only `{{ }}`, `{% %}` and `{# #}`; everything else is literal output, so pasted Python gets neither executed nor rejected. (Cause was an ambiguous instruction — "after the `weekday_names` line", and both files have one.)
+- **`gh pr create -B main` was run while still standing on the feature branch**, opening PR #21 as `feature/…` → `main` and skipping `develop` entirely. `gh pr create` takes the head branch from wherever you are, so the release PR only comes out right *after* the feature PR merges and `gh` has switched you back. Closed #21 — closing a PR touches no commits. **`git branch --show-current` before creating a release PR is the guard.**
+- **The back-merge silently no-opped.** `git merge origin/main && git push` after PR #22 merged reported *Already up to date* and pushed nothing. `origin/main` is a **local cache** of where `main` was the last time the machine talked to GitHub; `gh pr merge` happens server-side and tells local git nothing. Only `git fetch` refreshes it. Both commands exited 0. Caught by comparing `gh api repos/externoo/calen/git/ref/heads/main` against `git rev-parse origin/main` — `ef358dd` vs `b1ee429`. **The back-merge is `git fetch origin && git merge origin/main && git push`**; without the fetch, `git log --oneline develop..origin/main` cheerfully reports level branches by reading the stale ref.
+- **The commit message's attribution trailers were eaten by the shell** on paste (the blank line before them). Cosmetic; the subject also came out as "Marks" rather than the imperative "Mark". Neither was worth an amend.
+
+Also worth recording: `python manage.py test` was green **before** the change as well, because nothing tests `home`. Green here was not evidence the feature worked — looking at the page was the only check it got. `home` being the untested view, demonstrating itself, for the second session running.
+
+Predictions confirmed: PR #20 into ungated `develop` opened `CLEAN`; PR #22 into `main` never showed `BLOCKED`, because the identical commits had already been tested on the branch and GitHub had the result waiting; the back-merge was a fast-forward once it actually ran, since `develop`'s tip is a parent of the merge commit.
+
+Left at: `develop`, `origin/develop` and `origin/main` all at `ef358dd`, both `git log` ranges empty, working tree clean, no open PRs, 22 PRs total, feature branch deleted locally and on `origin`. Local `main` is the usual stale pointer at `2d4b421`, now 29 behind. Between this session and the i18n one, PRs #18/#19 landed the three-zone nav rearrange and switched the calendar to `MONTH_NAMES` from `main\dates.py`.
+
+Next: a test for `home` — see **Current state**. Then edit/delete for `Commitment`, which is the ownership lesson.
 
 ## Session history (2026-09-05, part two — i18n)
 

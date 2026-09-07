@@ -36,3 +36,65 @@ class DayViewTests(TestCase):
         self.assertEqual(commitment.date, datetime.date(2026, 1, 15))
 
         self.assertRedirects(response, self.url)
+
+
+class CommitmentEditDeleteTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.owner = User.objects.create_user(
+            username="owner", password="pw-for-tests-only"
+        )
+        self.other = User.objects.create_user(
+            username="other", password="pw-for-tests-only"
+        )
+        self.commitment = Commitment.objects.create(
+            user=self.owner,
+            date=datetime.date(2026, 1, 15),
+            text="Original text",
+        )
+        self.day_url = reverse("day", args=[2026, 1, 15])
+        self.edit_url = reverse("commitment_edit", args=[self.commitment.pk])
+        self.delete_url = reverse("commitment_delete", args=[self.commitment.pk])
+
+    # --- edit -------------------------------------------------------------
+
+    def test_owner_can_edit_and_no_second_row_is_created(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(self.edit_url, {"text": "Edited text"})
+
+        self.commitment.refresh_from_db()
+        self.assertEqual(self.commitment.text, "Edited text")
+        self.assertEqual(Commitment.objects.count(), 1)
+        self.assertRedirects(response, self.day_url)
+
+    def test_other_user_cannot_edit(self):
+        self.client.force_login(self.other)
+        response = self.client.post(self.edit_url, {"text": "Hacked"})
+
+        self.assertEqual(response.status_code, 404)
+        self.commitment.refresh_from_db()
+        self.assertEqual(self.commitment.text, "Original text")
+
+    # --- delete -----------------------------------------------------------
+
+    def test_owner_can_delete(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(self.delete_url)
+
+        self.assertEqual(Commitment.objects.count(), 0)
+        self.assertRedirects(response, self.day_url)
+
+    def test_other_user_cannot_delete(self):
+        self.client.force_login(self.other)
+        response = self.client.post(self.delete_url)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(Commitment.objects.count(), 1)
+
+    def test_get_on_delete_only_confirms_and_does_not_delete(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(self.delete_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "main/commitment_confirm_delete.html")
+        self.assertEqual(Commitment.objects.count(), 1)

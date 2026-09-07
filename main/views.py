@@ -1,7 +1,8 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.utils.dates import WEEKDAYS_ABBR
 from .dates import MONTH_NAMES
 from .forms import CommitmentForm
+from .models import Commitment
 import calendar
 import datetime
 
@@ -57,4 +58,38 @@ def day(request, year, month, day):
         "date": date, 
         "commitments": commitments,
         "form": form,
+    })
+
+
+def commitment_edit(request, pk):
+    commitment = get_object_or_404(Commitment, pk=pk, user=request.user)
+
+    if request.method == "POST":
+        form = CommitmentForm(request.POST, instance=commitment)
+        if form.is_valid():
+            form.save()
+            return redirect(
+                "day",
+                year=commitment.date.year,
+                month=commitment.date.month,
+                day=commitment.date.day,
+            )
+    else:
+        form = CommitmentForm(instance=commitment)
+
+    return render(request, "main/commitment_form.html", {
+        "form": form,
+        "commitment": commitment,
+    })
+
+def commitment_delete(request, pk):
+    commitment = get_object_or_404(Commitment, pk=pk, user=request.user)
+
+    if request.method == "POST":
+        date = commitment.date
+        commitment.delete()
+        return redirect("day", year=date.year, month=date.month, day=date.day)
+
+    return render(request, "main/commitment_confirm_delete.html", {
+        "commitment": commitment,
     })
