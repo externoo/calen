@@ -10,6 +10,7 @@
       "Courier New", monospace;
     --color-red-700: oklch(50.5% 0.213 27.518);
     --color-amber-200: oklch(92.4% 0.12 95.746);
+    --color-amber-300: oklch(87.9% 0.169 91.605);
     --color-amber-700: oklch(55.5% 0.163 48.998);
     --color-purple-700: oklch(49.6% 0.265 301.924);
     --color-fuchsia-700: oklch(51.8% 0.253 323.949);
@@ -266,9 +267,6 @@
   .flex-col {
     flex-direction: column;
   }
-  .flex-wrap {
-    flex-wrap: wrap;
-  }
   .items-center {
     align-items: center;
   }
@@ -298,9 +296,6 @@
   .gap-x-4 {
     column-gap: calc(var(--spacing) * 4);
   }
-  .gap-y-1 {
-    row-gap: var(--spacing);
-  }
   .rounded {
     border-radius: 0.25rem;
   }
@@ -324,6 +319,9 @@
   }
   .border-slate-200 {
     border-color: var(--color-slate-200);
+  }
+  .bg-amber-200 {
+    background-color: var(--color-amber-200);
   }
   .bg-amber-700 {
     background-color: var(--color-amber-700);
@@ -426,6 +424,9 @@
     .hover\:bg-amber-200:hover {
       background-color: var(--color-amber-200);
     }
+    .hover\:bg-amber-300:hover {
+      background-color: var(--color-amber-300);
+    }
     .hover\:bg-fuchsia-700:hover {
       background-color: var(--color-fuchsia-700);
     }
@@ -433,9 +434,6 @@
   @media (width >= 40rem) {
     .sm\:grid-cols-2 {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .sm\:justify-between {
-      justify-content: space-between;
     }
   }
   @media (width >= 64rem) {

@@ -13,12 +13,28 @@ def home(request):
 
     weekday_names = [WEEKDAYS_ABBR[(firstweekday + offset) % 7] for offset in range(7)]
 
+    marked_dates = set(
+        request.user.commitments.filter(date__year=year).values_list("date", flat=True)
+    )
+
     months = []
     for month_number in range(1, 13):
+        weeks = []
+        for week in cal.monthdayscalendar(year, month_number):
+            cells = []
+            for day_number in week:
+                if day_number == 0:
+                    cells.append(None)
+                else:
+                    cells.append({
+                        "number": day_number,
+                        "busy": datetime.date(year, month_number, day_number) in marked_dates,
+                    })
+            weeks.append(cells)
         months.append({
             "number": month_number,
             "name": MONTH_NAMES[month_number],
-            "weeks": cal.monthdayscalendar(year, month_number),
+            "weeks": weeks,
         })
     return render(request, 'main/home.html', {"year": year, "months": months, "weekday_names": weekday_names})
 
