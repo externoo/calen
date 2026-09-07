@@ -13,11 +13,12 @@
                 {%  for name in weekday_names %}<div>{{ name }}</div>{% endfor %}
             </div>
 
+
             {% for week in month.weeks %}
             <div class="grid grid-cols-7 text-center text-sm">
                 {% for day in week %}
                     {% if day %}
-                        <a href="{% url 'day' year month.number day %}" class="block py-1 rounded hover:bg-amber-200">{{ day }}</a>
+                        <a href="{% url 'day' year month.number day.number %}" class="block py-1 rounded {% if day.busy %}bg-amber-200 font-semibold hover:bg-amber-300{% else %}hover:bg-amber-200{% endif %}">{{ day.number }}</a>
                     {% else %}
                     <div class="py-1"></div>
                     {% endif %}
