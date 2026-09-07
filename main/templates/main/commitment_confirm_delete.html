@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% translate "Delete commitment" %}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl p-10">
+    <h1 class="text-3xl font-bold">{% translate "Delete commitment" %}</h1>
+
+    <p class="mt-4">{% translate "Are you sure you want to delete this commitment?" %}</p>
+    <p class="mt-2 rounded-sm border border-slate-200 p-3">{{ commitment.text }}</p>
+    <p class="mt-2 text-slate-600">{{ commitment.date|date:"l, j F Y" }}</p>
+
+    <form method="post" class="mt-6 flex items-center gap-4">
+        {% csrf_token %}
+        <button type="submit" class="bg-red-700 hover:bg-red-800
+        transition-colors text-white p-2 rounded-sm">{% translate "Delete" %}</button>
+        <a href="{% url 'day' commitment.date.year commitment.date.month commitment.date.day %}"
+           class="text-slate-600 hover:underline">{% translate "Cancel" %}</a>
+    </form>
+</div>
+{% endblock %}

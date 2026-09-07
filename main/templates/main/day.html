@@ -16,7 +16,15 @@
 
     <ul class="mt-6 space-y-2">
       {% for commitment in commitments %}
-          <li class="rounded-sm border border-slate-200 p-3">{{ commitment.text }}</li>
+        <li class="rounded-sm border border-slate-200 p-3 flex items-center justify-between gap-4">
+            <span>{{ commitment.text }}</span>
+            <span class="flex items-center gap-3 shrink-0">
+                <a href="{% url 'commitment_edit' commitment.pk %}"
+                   class="text-sm text-amber-700 hover:underline">{% translate "Edit" %}</a>
+                <a href="{% url 'commitment_delete' commitment.pk %}"
+                   class="text-sm text-red-700 hover:underline">{% translate "Delete" %}</a>
+            </span>
+        </li>
       {% empty %}
           <li class="text-slate-600">{% translate "Nothing committed for this day yet." %}</li>
       {% endfor %}
