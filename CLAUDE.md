@@ -66,6 +66,8 @@ Tailwind knows nothing about Django. Two independent chains have to both be inta
 
 **Generation** — `static\src\input.css` (hand-written, ~4 lines) declares `@source` paths. The CLI scans those paths for class-name strings and writes `static\css\output.css` (generated; never edit).
 
+The import line reads `@import "tailwindcss" source(none);`, and the `source(none)` is load-bearing. Without it Tailwind v4 also runs **automatic source detection**, which walks the whole project directory — everything not gitignored and not binary — looking for anything shaped like a class name. `@source` lines *add* to that set; they do not replace it. The effect is that **English prose generates CSS**: `CLAUDE.md`'s own RTL section, which lists `text-start`, `border-s` and friends as advice, was putting those rules into `output.css`, along with `.visible`, `.collapse`, `.contents`, `.filter` and `.relative` scraped out of ordinary sentences — 98 lines of stylesheet built from documentation, none of it used by any template. `source(none)` switches detection off and makes the three `@source` paths the complete and only truth.
+
 **Serving** — `templates\base.html` links it via `{% static 'css/output.css' %}`; `STATICFILES_DIRS = [BASE_DIR / "static"]` is what lets Django find the project-level `static\` folder at all (its default is app-level `static\` only).
 
 Consequences worth internalizing:
@@ -130,6 +132,26 @@ The row is found only if the UUID matches *and* it belongs to the requester. `da
 - **404, not 403.** A 403 admits the row exists, which lets someone probing UUIDs map what is real. A 404 says "no such thing", which is what a stranger should get.
 - **Drop `user=request.user` and nothing anywhere complains.** Every page still works, in the browser, forever. On `commitment_edit` that is data corruption; on `commitment_delete` it is destruction. The two ownership tests in `CommitmentEditDeleteTests` are the only guard, and they were watched failing (`302 != 404` — the delete *succeeded*) before being trusted.
 - **Scope in the query, never fetch-then-check.** `get()` followed by `if obj.user != request.user` is one early `return` away from being wrong, and it has already loaded the row.
+
+### The idle timeout
+
+Two settings at the bottom of `settings.py`, and they only work as a pair:
+
+```python
+SESSION_COOKIE_AGE = 60 * 20
+SESSION_SAVE_EVERY_REQUEST = True
+```
+
+**`SESSION_COOKIE_AGE` alone is an *absolute* timeout, not an idle one.** Django saves the session only when its data changed (`session.modified`), and `expire_date` is only recomputed on save. Ordinary browsing — loading the calendar, opening a day, even creating a `Commitment` — writes to the database but never to the *session*, so nothing is saved and the deadline never moves. The window therefore runs from **login**, and a user twenty minutes into an active session gets logged out mid-work.
+
+`SESSION_SAVE_EVERY_REQUEST` tells `SessionMiddleware` to save regardless of `modified`. Each save recomputes `expire_date = now + SESSION_COOKIE_AGE` and re-sends the cookie with a fresh `Max-Age`, so the deadline slides on every request and only stops sliding when the user stops.
+
+- **Not defining a setting is not the same as it being off.** Every default lives in `django\conf\global_settings.py`, which `settings.py` is a layer of overrides on top of. `SESSION_SAVE_EVERY_REQUEST` defaults to `False`, `SESSION_COOKIE_AGE` to `1209600` (two weeks). A typo'd setting name is silently a *new* setting nobody reads, while the real one keeps its default.
+- **The default is `False` for two reasons**: it costs one database write per request (the engine here is the default `db` one), and sliding is pointless on a two-week window. The short age and the sliding flag are a pair — shortening the age alone is the bug.
+- **There are two expiry clocks.** The cookie's `Max-Age`, enforced by the browser, and `django_session.expire_date`, enforced by the server. Both are refreshed on save, and either lapsing logs the user out — which is why hand-editing the cookie buys nothing.
+- Side effect for later: every response now carries a fresh `Set-Cookie` and varies by cookie, so it is less cacheable by any proxy put in front of the site.
+
+Two tests in `accounts\tests.py::SessionTimeoutTests`, and **only the second one tests the feature**. `test_an_expired_session_redirects_to_login` calls `set_expiry(-1)` and `save()` — the save is load-bearing, since `set_expiry` alone only changes the in-memory object and the test would pass against an app with no timeout at all. `test_activity_pushes_the_expiry_forward` sets `expire_date` 30 seconds out with a raw `.update()` (still valid, or the request would be bounced and create a *different* session), makes one ordinary request, and asserts the expiry moved further away. Comment out `SESSION_SAVE_EVERY_REQUEST` and exactly one of the two goes red — the first stays green, because an expired session is still expired whether the timeout is idle or absolute.
 
 ### Two gotchas that cost time
 
@@ -358,7 +380,13 @@ Things that are the way they are on purpose:
 - **No `npm`/Tailwind step.** `output.css` is committed, so it is an *input* after checkout, not something CI must produce. Nothing under test reads it: `{% static %}` only builds a URL string and never opens the file, so the CSS could be deleted and all tests would still pass. Adding `npm ci` would import Node drift, registry outages and ~30s per run — failure modes uncorrelated with correctness, on what is now a *mandatory* merge gate. A red build nobody trusts is worse than no build.
 - **Action versions are floating major tags** (`@v5`, `@v6`). Majors are where breaking changes live, which is exactly why the Node 20 → 24 runner deprecation needed a manual bump — the pin working correctly, not failing. `@main` would break unpredictably; a full SHA pin is stricter (and the right call for security-sensitive repos) at the cost of manual patch bumps.
 
-Worth knowing: **`output.css` is not rebuilt or verified by CI**, so a stale one — edited templates with the watcher off — merges silently. The check for that would be building it and `git diff --exit-code static/css/output.css`; it needs a `.gitattributes` first or CRLF will make it always differ.
+### The `artifacts` job
+
+A second job, added in PR #26, rebuilds both generated-but-committed files and fails if either differs from the tree: `npm ci && npm run build:css` then `git diff --exit-code -- static/css/output.css`, and `find locale -name '*.mo' -delete` then `compilemessages` then the same diff on `locale/**/*.mo`. The `.mo` deletion is required because `compilemessages` skips a `.po` whose `.mo` is newer and git does not preserve mtimes — without it the step passes without compiling anything.
+
+**It is deliberately not a required status check.** It pulls in npm and apt, whose failure modes (registry outages, Node drift) are uncorrelated with whether the code is correct, and the ruleset gates `main` on `test` alone. It reports; it does not gate. A PR with `artifacts` red therefore shows `UNSTABLE`, not `BLOCKED`, and can still be merged — which is the point, but it means a red `artifacts` has to be read rather than waited out.
+
+It earned its keep immediately on 2026-09-13: it caught a one-word English comment in `settings.py` generating a `.absolute` rule, which is what exposed the automatic-source-detection behaviour described under **Tailwind ↔ Django wiring**.
 
 ### Branch protection on `main`
 
@@ -400,7 +428,7 @@ Caveat: PR #5 reported `BEHIND` and then went `CLEAN` with no branch update, whi
 
 ## Current state
 
-Working: the 2026 calendar grid (`home`), **marking the days that have commitments**, the `day` page with commitment create + list, the full auth flow, the admin for both models, and **English/Arabic translation with RTL** (see **Internationalization** above). `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
+Working: the 2026 calendar grid (`home`), **marking the days that have commitments**, the `day` page with commitment create + list, the full auth flow with a **twenty-minute idle timeout** (see **The idle timeout**), the admin for both models, and **English/Arabic translation with RTL** (see **Internationalization** above). `main\models.py` has an abstract `UUIDModel` plus `Commitment` (user FK, date, text, created_at).
 
 `home` fetches the marked days in **one** query — `set(request.user.commitments.filter(date__year=year).values_list("date", flat=True))` — and then passes each day cell as `{"number": n, "busy": bool}`, or `None` for the padding days `monthdayscalendar` returns as `0`. `None` is falsy, so the template's pre-existing `{% if day %}` blank-cell branch needed no edit.
 
@@ -408,7 +436,7 @@ Three decisions in there worth keeping:
 
 - **The set is built once, outside the day loop.** The alternative — a query per day — is 365 per page load, and on a dev database with three rows it looks and feels identical. Query count is not visible by looking.
 - **`request.user.commitments` is what scopes it.** `LoginRequiredMiddleware` proves *someone* is logged in, never *whose* rows you may read. Here that is a privacy leak rather than the security hole it would be for edit/delete, but it is the same missing check.
-- **The view passes a boolean; the template picks between two complete class strings.** The rule is not "class strings must come from the view" — it is that Tailwind must see every class as literal text in a file it scans, and `input.css` only `@source`s the three template folders. A class string written in `views.py` would generate nothing, silently, until an `@source "../../main/views.py"` line was added. Worth paying for many variants (shading by commitment count); not worth it for two states.
+- **The view passes a boolean; the template picks between two complete class strings.** The rule is not "class strings must come from the view" — it is that Tailwind must see every class as literal text in a file it scans, and `input.css` only `@source`s the three template folders. A class string written in `views.py` generates nothing, silently, until an `@source "../../main/views.py"` line is added. **This became true only on 2026-09-13**, when `source(none)` turned automatic source detection off — before that the scanner walked the whole project and `views.py` was already being read, so the warning was the opposite of the truth. See **Tailwind ↔ Django wiring**. Worth paying for many variants (shading by commitment count); not worth it for two states.
 
 
 `day` handles both GET and POST: `CommitmentForm` (a `ModelForm` on `text` alone) is saved with `commit=False` so the view can attach `user` and `date` before saving, then redirects to itself so a refresh doesn't resubmit. The list comes from `request.user.commitments` — the FK's `related_name`.
@@ -425,7 +453,7 @@ Two idioms in there worth reusing. `Commitment.objects.get()` with **no argument
 
 The POST test's `user` and `date` assertions are the ones that earn their keep — they are the two fields nothing in the request sets, attached by hand between `save(commit=False)` and `save()`. Nothing asserts on `created_at`: it's `auto_now_add`, so testing it would be testing Django.
 
-`accounts\tests.py` holds `RegisterViewTests` — three more, covering the registration contract: the anonymous GET returns 200 (the `@login_not_required` regression test — lose that decorator and `LoginRequiredMiddleware` bounces every would-be signup to the login page, silently), a valid POST creating exactly one user and redirecting to `accounts:login`, and a mismatched-password POST creating none. **Eleven tests total.**
+`accounts\tests.py` holds `RegisterViewTests` — three more, covering the registration contract: the anonymous GET returns 200 (the `@login_not_required` regression test — lose that decorator and `LoginRequiredMiddleware` bounces every would-be signup to the login page, silently), a valid POST creating exactly one user and redirecting to `accounts:login`, and a mismatched-password POST creating none. It also holds `SessionTimeoutTests` (see **The idle timeout**). With the `send_reminders` tests, **seventeen tests total** — the "eleven" this file claimed until 2026-09-13 predated the Telegram work and was never updated, so trust `python manage.py test` over the number written here.
 
 `CommitmentEditDeleteTests` is the other five, and its `setUp` creates **two** users — without a second one the thing worth testing cannot be expressed. Owner-can-edit (asserting `count() == 1`, which is what catches a missing `instance=`), owner-can-delete, and then the three that are the point: `other` gets a 404 on edit *and the text is unchanged*, `other` gets a 404 on delete *and the row survives*, and a GET on the delete URL returns the confirmation page while deleting nothing.
 
@@ -442,7 +470,7 @@ Not done yet:
 - **`home` is the only untested view, and now the one with the most in it.** `day` and registration are covered; the calendar grid is not — and it carries the weekday rotation, the `MONTH_NAMES` lookup, the `marked_dates` query and the per-day `busy` flag. Three of those fail silently. The test that earns its keep first: create a commitment for user A, log in as user B, and assert B's grid does not mark that day — the `request.user.commitments` scope is a privacy boundary with nothing guarding it.
 - **Nothing tests i18n at all.** Everything was verified by hand in throwaway scripts. The highest-value test is small: POST to `/i18n/setlang/` with `language=ar` as an **anonymous** user, then assert `dir="rtl"` in the response — that one guards the `login_not_required` wrapper on `set_language`, the same silent-lockout class as the `RegisterView` test.
 - **No CD.** There is CI but nothing deploys anywhere, and no host has been chosen.
-- **CI never checks that `output.css` or `django.mo` is fresh.** Two generated-but-committed files with the same failure mode now: edit the source with the watcher off (or skip `compilemessages`) and a stale artifact merges silently. The check is building each and `git diff --exit-code` on it; `.gitattributes` covers both, so it is unblocked.
+- **A stale `output.css` or `django.mo` can still merge.** The `artifacts` job checks both (see **CI**), but it is not a required check, so a red one is advisory — the merge button stays live. Making it required is the remaining half, and it trades a real gate for npm/apt flakiness on `main`.
 - **Only `ar` is translated, and only the strings that existed on 2026-09-05.** Any new user-facing string needs marking, then `makemessages`, then `compilemessages`.
 - **Telegram reminders have no scheduler.** Sending works (see **Telegram
   notifications** above) but nothing runs it on a clock. This is the whole
