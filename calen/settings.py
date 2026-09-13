@@ -162,3 +162,10 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 LOGIN_URL = 'accounts:login'
 LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'home'
+
+# Idle timeout, not an absolute one. SESSION_COOKIE_AGE alone is counted from
+# login, so a session dies 20 minutes after signing in no matter how active you
+# were. SESSION_SAVE_EVERY_REQUEST is what re-stamps the expiry on every
+# request, restarting the clock each time the user does anything.
+SESSION_COOKIE_AGE = 60 * 20
+SESSION_SAVE_EVERY_REQUEST = True
